@@ -1,0 +1,17 @@
+{
+  "name": "Seguimiento de obras OICI",
+  "short_name": "Obras OICI",
+  "description": "Etapas, hitos y cuaderno de obra de estructuras y obras OICI.",
+  "lang": "es-UY",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1B2A35",
+  "theme_color": "#1B2A35",
+  "icons": [
+    { "src": "iconos/icono-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "iconos/icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "iconos/icono-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

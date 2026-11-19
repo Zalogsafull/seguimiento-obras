@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js";
+import { crearApi } from "./api.js?v=2026-11-19-1";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -176,6 +176,8 @@ function prepararIngreso() {
     $("#tab-entrar").setAttribute("aria-selected", m === "entrar");
     $("#tab-crear").setAttribute("aria-selected", m === "crear");
     $("#campo-nombre").hidden = m !== "crear";
+    $("#campo-repetir").hidden = m !== "crear";
+    $("#form-ingreso").password2.required = m === "crear";
     $("#boton-ingreso").textContent = m === "crear" ? "Crear cuenta" : "Ingresar";
     $("#form-ingreso").password.autocomplete = m === "crear" ? "new-password" : "current-password";
     $("#error-ingreso").hidden = true;
@@ -185,8 +187,14 @@ function prepararIngreso() {
   $("#form-ingreso").onsubmit = async (ev) => {
     ev.preventDefault();
     const f = ev.target, b = $("#boton-ingreso");
-    b.disabled = true;
     $("#error-ingreso").hidden = true;
+    if (modo === "crear" && f.password.value !== f.password2.value) {
+      $("#error-ingreso").textContent = "Las dos contraseñas no coinciden. Escribilas de nuevo.";
+      $("#error-ingreso").hidden = false;
+      f.password2.value = ""; f.password2.focus();
+      return;
+    }
+    b.disabled = true;
     try {
       S.usuario = modo === "crear"
         ? await S.api.crearCuenta(f.email.value.trim(), f.password.value, f.nombre.value.trim() || f.email.value.trim())
@@ -210,13 +218,16 @@ function prepararIngreso() {
   $("#form-olvido").onsubmit = async (ev) => {
     ev.preventDefault();
     const f = ev.target, b = f.querySelector("button[type=submit]");
-    b.disabled = true; $("#error-olvido").hidden = true; $("#ok-olvido").hidden = true;
+    b.disabled = true; b.textContent = "Enviando…"; $("#error-olvido").hidden = true; $("#ok-olvido").hidden = true;
     try {
-      await S.api.pedirReseteo(f.email.value.trim(), location.origin + location.pathname);
+      await Promise.race([
+        S.api.pedirReseteo(f.email.value.trim(), location.origin + location.pathname),
+        new Promise((_, no) => setTimeout(() => no(new Error("El servidor no respondió. Probá de nuevo en un rato.")), 20000)),
+      ]);
       $("#ok-olvido").textContent = `Si ${f.email.value.trim()} tiene cuenta, te llega un correo con el enlace. Revisá también la carpeta de spam.`;
       $("#ok-olvido").hidden = false;
-    } catch (e) { $("#error-olvido").textContent = traducir(e.message); $("#error-olvido").hidden = false; }
-    finally { b.disabled = false; }
+    } catch (e) { $("#error-olvido").textContent = traducir(e.message) || "No se pudo enviar el correo."; $("#error-olvido").hidden = false; }
+    finally { b.disabled = false; b.textContent = "Enviar enlace"; }
   };
   const q = new URLSearchParams(location.search);
   if (q.get("error")) {
@@ -713,5 +724,22 @@ async function abrirAdmin() {
     };
   });
 }
+
+// ------------------------------------------------------------ instalar como app
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+let pedidoInstalar = null;
+window.addEventListener("beforeinstallprompt", (ev) => {
+  ev.preventDefault();
+  pedidoInstalar = ev;
+  $("#instalar").hidden = false;
+});
+$("#instalar").onclick = async () => {
+  if (!pedidoInstalar) return;
+  pedidoInstalar.prompt();
+  await pedidoInstalar.userChoice;
+  pedidoInstalar = null;
+  $("#instalar").hidden = true;
+};
+window.addEventListener("appinstalled", () => { $("#instalar").hidden = true; aviso("App instalada"); });
 
 iniciar();
