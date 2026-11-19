@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Seguimiento de obras OICI</title>
+  <meta name="theme-color" content="#1B2A35">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 9 29h3l1.6-6h4.8l1.6 6h3L16 3Zm0 8 1.8 9h-3.6L16 11Z' fill='%231B2A35'/%3E%3C/svg%3E">
+</head>
+<body>
+  <!-- Ingreso -->
+  <section id="vista-ingreso" class="ingreso" hidden>
+    <div class="ingreso-caja">
+      <h1 class="marca">Seguimiento de obras <span>OICI</span></h1>
+      <p class="ingreso-texto">Etapas, hitos y cuaderno de cada estructura y obra, los mismos datos que usás en QGIS y QField.</p>
+      <div class="pestanas" role="tablist">
+        <button role="tab" id="tab-entrar" aria-selected="true">Ingresar</button>
+        <button role="tab" id="tab-crear" aria-selected="false">Crear cuenta</button>
+      </div>
+      <form id="form-ingreso" class="form" autocomplete="on">
+        <label id="campo-nombre" hidden>Nombre
+          <input name="nombre" autocomplete="name">
+        </label>
+        <label>Correo
+          <input name="email" type="email" required autocomplete="email">
+        </label>
+        <label>Contraseña
+          <input name="password" type="password" required minlength="8" autocomplete="current-password">
+        </label>
+        <p class="error" id="error-ingreso" role="alert" hidden></p>
+        <button class="boton boton-primario" type="submit" id="boton-ingreso">Ingresar</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- Cuenta sin habilitar -->
+  <section id="vista-pendiente" class="ingreso" hidden>
+    <div class="ingreso-caja">
+      <h1 class="marca">Seguimiento de obras <span>OICI</span></h1>
+      <h2>Tu cuenta todavía no está habilitada</h2>
+      <p>Pedile a quien administra el sistema que habilite este correo:</p>
+      <p class="correo-pendiente" id="correo-pendiente"></p>
+      <p class="nota">Cuando te habiliten, volvé a abrir esta página.</p>
+      <button class="boton" id="salir-pendiente">Salir</button>
+    </div>
+  </section>
+
+  <!-- Aplicación -->
+  <div id="vista-app" class="app" hidden>
+    <header class="barra">
+      <h1 class="marca">Obras <span>OICI</span></h1>
+      <label class="interruptor" title="Mostrar solo las obras donde figurás como director de obra">
+        <input type="checkbox" id="mis-obras">
+        <span>Mis obras</span>
+      </label>
+      <div class="usuario">
+        <span id="nombre-usuario"></span>
+        <button class="boton boton-chico" id="salir">Salir</button>
+      </div>
+    </header>
+
+    <aside class="panel" id="panel">
+      <div class="panel-cabeza">
+        <div class="pestanas" role="tablist">
+          <button role="tab" id="tab-lista" aria-selected="true">Obras</button>
+          <button role="tab" id="tab-venc" aria-selected="false">Vencimientos</button>
+        </div>
+        <div id="filtros" class="filtros">
+          <input type="search" id="buscar" placeholder="Buscar por código, localidad o licitación" aria-label="Buscar">
+          <div class="chips" id="chips-capa" aria-label="Capas"></div>
+          <div class="chips" id="chips-situacion" aria-label="Situación"></div>
+        </div>
+      </div>
+      <div class="panel-cuerpo">
+        <ol class="lista" id="lista"></ol>
+        <div id="vencimientos" hidden></div>
+      </div>
+    </aside>
+
+    <main class="mapa-zona">
+      <div id="mapa" aria-label="Mapa de obras"></div>
+      <div class="leyenda" id="leyenda"></div>
+    </main>
+
+    <section class="ficha" id="ficha" hidden aria-live="polite"></section>
+  </div>
+
+  <div class="avisos" id="avisos" aria-live="polite"></div>
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
