@@ -282,7 +282,8 @@ function pintarCapas() {
   p.innerHTML = `${html}
     <div class="arbol-grupo"><p class="nodo nodo-grupo">Formas</p><div class="formas">${formas}</div></div>
     <div class="arbol-grupo"><p class="nodo nodo-grupo">Mapa base</p>
-      <div class="bases">${Object.keys(S.base).map((b) => `<label class="nodo"><input type="radio" name="base" value="${b}" ${S.mapa.hasLayer(S.base[b]) ? "checked" : ""}> ${b}</label>`).join("")}</div></div>
+      <div class="bases">${Object.keys(S.base).map((b) => `<label class="nodo"><input type="radio" name="base" value="${b}" ${S.mapa.hasLayer(S.base[b]) ? "checked" : ""}> ${b}</label>`).join("")}</div>
+      <label class="nodo"><input type="checkbox" name="deptos" ${S.deptosOn ? "checked" : ""}> Departamentos</label></div>
     ${filtrosActivos() ? `<p class="nota aviso-filtro">Hay ${filtrosActivos()} filtro${filtrosActivos() > 1 ? "s" : ""} activo${filtrosActivos() > 1 ? "s" : ""}: las cantidades ya los tienen en cuenta.</p>` : ""}`;
   p.querySelectorAll('[data-medio="true"]').forEach((el) => (el.indeterminate = true));
   p.onchange = (ev) => {
@@ -290,7 +291,11 @@ function pintarCapas() {
     if (el.dataset.grupo) CAPAS.filter((c) => c.grupo === el.dataset.grupo).forEach((c) => (S.capaOn[c.id] = el.checked));
     if (el.dataset.capa) S.capaOn[el.dataset.capa] = el.checked;
     if (el.dataset.cat) S.catOn[el.dataset.cat] = el.checked;
-    if (el.name === "base") for (const [k, l] of Object.entries(S.base)) k === el.value ? l.addTo(S.mapa) : l.remove();
+    if (el.name === "base") {
+      for (const [k, l] of Object.entries(S.base)) k === el.value ? l.addTo(S.mapa) : l.remove();
+      $("#mapa").classList.toggle("fondo-oscuro", el.value.startsWith("Gris"));
+    }
+    if (el.name === "deptos") { S.deptosOn = el.checked; el.checked ? S.deptos.addTo(S.mapa) : S.deptos.remove(); }
     pintar();
   };
   p.onclick = (ev) => {
@@ -408,10 +413,26 @@ function pintarVencimientos() {
 function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: true, attributionControl: true }).setView([-32.6, -56.0], 7);
+  S.base["Gris (como QGIS)"] = L.layerGroup().addTo(S.mapa);
   S.base["Calles"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(S.mapa);
+    maxZoom: 19, attribution: "© OpenStreetMap" });
   S.base["Satélite"] = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 19, attribution: "Imágenes © Esri" });
+  $("#mapa").classList.add("fondo-oscuro");
+  S.mapa.createPane("deptos").style.zIndex = 350;
+  S.deptos = L.layerGroup().addTo(S.mapa);
+  S.deptosOn = true;
+  fetch("datos/departamentos.geojson").then((r) => r.json()).then((gj) => {
+    L.geoJSON(gj, {
+      pane: "deptos", interactive: false, pointToLayer: () => null,
+      style: { color: "#626262", weight: 1, fill: false },
+      onEachFeature: (f, capa) => {
+        const nombre = String(f.properties.nombre || "").toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase());
+        L.marker(capa.getBounds().getCenter(), { interactive: false, keyboard: false,
+          icon: L.divIcon({ className: "depto-nombre", html: `<span>${esc(nombre)}</span>`, iconSize: [0, 0] }) }).addTo(S.deptos);
+      },
+    }).addTo(S.deptos);
+  }).catch(() => {});
   const lejos = () => $("#mapa").classList.toggle("lejos", S.mapa.getZoom() < 8);
   S.mapa.on("zoomend", lejos); lejos();
 }
