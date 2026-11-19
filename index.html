@@ -34,6 +34,22 @@
         </label>
         <p class="error" id="error-ingreso" role="alert" hidden></p>
         <button class="boton boton-primario" type="submit" id="boton-ingreso">Ingresar</button>
+        <button class="enlace" type="button" id="olvide">Olvidé mi contraseña</button>
+      </form>
+      <form id="form-olvido" class="form" hidden>
+        <p class="nota" style="margin:0">Escribí tu correo y te mandamos un enlace para elegir una contraseña nueva. El enlace vence en 1 hora.</p>
+        <label>Correo<input name="email" type="email" required autocomplete="email"></label>
+        <p class="error" id="error-olvido" role="alert" hidden></p>
+        <p class="ok" id="ok-olvido" role="status" hidden></p>
+        <button class="boton boton-primario" type="submit">Enviar enlace</button>
+        <button class="enlace" type="button" id="volver-ingreso">Volver a Ingresar</button>
+      </form>
+      <form id="form-nueva" class="form" hidden>
+        <h2>Elegí una contraseña nueva</h2>
+        <label>Contraseña nueva<input name="password" type="password" required minlength="8" autocomplete="new-password"></label>
+        <label>Repetila<input name="password2" type="password" required minlength="8" autocomplete="new-password"></label>
+        <p class="error" id="error-nueva" role="alert" hidden></p>
+        <button class="boton boton-primario" type="submit">Guardar contraseña</button>
       </form>
     </div>
   </section>

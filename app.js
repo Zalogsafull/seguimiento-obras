@@ -165,7 +165,7 @@ async function iniciar() {
     return;
   }
   prepararIngreso();
-  if (!S.usuario) return mostrar("vista-ingreso");
+  if (!S.usuario || new URLSearchParams(location.search).get("token")) return mostrar("vista-ingreso");
   await entrarApp();
 }
 
@@ -200,6 +200,50 @@ function prepararIngreso() {
       b.disabled = false;
     }
   };
+  // ---- olvidé mi contraseña
+  const verForm = (id) => {
+    for (const f of ["form-ingreso", "form-olvido", "form-nueva"]) $("#" + f).hidden = f !== id;
+    document.querySelector("#vista-ingreso .pestanas").hidden = id !== "form-ingreso";
+  };
+  $("#olvide").onclick = () => { $("#form-olvido").email.value = $("#form-ingreso").email.value; verForm("form-olvido"); };
+  $("#volver-ingreso").onclick = () => verForm("form-ingreso");
+  $("#form-olvido").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = ev.target, b = f.querySelector("button[type=submit]");
+    b.disabled = true; $("#error-olvido").hidden = true; $("#ok-olvido").hidden = true;
+    try {
+      await S.api.pedirReseteo(f.email.value.trim(), location.origin + location.pathname);
+      $("#ok-olvido").textContent = `Si ${f.email.value.trim()} tiene cuenta, te llega un correo con el enlace. Revisá también la carpeta de spam.`;
+      $("#ok-olvido").hidden = false;
+    } catch (e) { $("#error-olvido").textContent = traducir(e.message); $("#error-olvido").hidden = false; }
+    finally { b.disabled = false; }
+  };
+  const q = new URLSearchParams(location.search);
+  if (q.get("error")) {
+    $("#error-ingreso").textContent = "El enlace para cambiar la contraseña no es válido o ya venció. Pedí uno nuevo.";
+    $("#error-ingreso").hidden = false;
+  }
+  if (q.get("token")) {
+    verForm("form-nueva");
+    $("#form-nueva").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      if (f.password.value !== f.password2.value) {
+        $("#error-nueva").textContent = "Las dos contraseñas no coinciden."; $("#error-nueva").hidden = false; return;
+      }
+      try {
+        await S.api.nuevaContrasena(q.get("token"), f.password.value);
+        history.replaceState(null, "", location.pathname);
+        verForm("form-ingreso");
+        $("#error-ingreso").hidden = true;
+        aviso("Contraseña cambiada. Ingresá con la nueva.");
+      } catch (e) {
+        $("#error-nueva").textContent = /invalid|expired/i.test(e.message)
+          ? "El enlace no es válido o ya venció. Pedí uno nuevo desde Olvidé mi contraseña." : traducir(e.message);
+        $("#error-nueva").hidden = false;
+      }
+    };
+  }
   const salir = async () => { await S.api.salir(); location.reload(); };
   $("#salir").onclick = salir;
   $("#salir-pendiente").onclick = salir;

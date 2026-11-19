@@ -30,6 +30,14 @@ async function crearNeon() {
       return this.usuario();
     },
     async salir() { await neon.auth.signOut(); },
+    async pedirReseteo(email, redirectTo) {
+      const r = await neon.auth.requestPasswordReset({ email, redirectTo });
+      if (r?.error) throw new Error(r.error.message || "No se pudo enviar el correo");
+    },
+    async nuevaContrasena(token, newPassword) {
+      const r = await neon.auth.resetPassword({ newPassword, token });
+      if (r?.error) throw new Error(r.error.message || "No se pudo cambiar la contraseña");
+    },
     async perfil() {
       return chequear(await neon.from("usuarios_web").select("*").maybeSingle(), "Perfil");
     },
@@ -137,6 +145,8 @@ function crearDemo() {
     async entrar(email) { await espera(); sesion = { id: "demo", email, name: "Gonza" }; return sesion; },
     async crearCuenta(email, p, name) { return this.entrar(email, p, name); },
     async salir() { sesion = null; },
+    async pedirReseteo() { await espera(); },
+    async nuevaContrasena() { await espera(); },
     async perfil() { return { user_id: "demo", nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true }; },
     async adminUsuarios() { await espera(); return structuredClone(cuentas); },
     async adminHabilitar(id, nombre, rol, ini) {

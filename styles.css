@@ -216,3 +216,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #mapa:not(.fondo-oscuro) .depto-nombre span { color: #555; text-shadow: 0 0 2px #fff; }
 .fondo-oscuro .leaflet-control-attribution { background: rgba(33,33,33,.7); color: #999; }
 .fondo-oscuro .leaflet-control-attribution a { color: #bbb; }
+
+.enlace { border: 0; background: none; color: var(--acento); padding: 4px 0; cursor: pointer; font-size: 14px; justify-self: start; text-decoration: underline; text-underline-offset: 2px; }
+.ok { color: #1E6B3A; margin: 0; font-size: 14px; }
+.ingreso-caja .form h2 { margin: 0 0 4px; }
