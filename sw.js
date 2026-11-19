@@ -1,7 +1,7 @@
 // Service worker: permite instalar la web como app y evita usar archivos viejos.
 // Estrategia "primero la red": siempre trae la versión nueva; la copia guardada
 // solo se usa si no hay conexión. Los datos de Neon y los mapas no se guardan.
-const CACHE = "obras-oici-2026-11-19-1";
+const CACHE = "obras-oici-2026-11-19-2";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (ev) => {

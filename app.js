@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-19-1";
+import { crearApi } from "./api.js?v=2026-11-19-2";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -109,8 +109,30 @@ const S = {
   f: { mias: false, texto: "", director: "", licitacion: "", estructura: "", anio: "" },
   abierta: null, tab: "capas",
   mapa: null, base: {}, marcadores: new Map(), primeraVez: true,
+  baseNombre: "Gris (como QGIS)", deptosOn: true,
 };
 const editor = () => S.perfil?.rol === "EDITOR";
+
+// ------------------------------------------------------------ recordar cómo dejaste las capas (en este dispositivo)
+const CLAVE_ESTADO = "obras-oici-capas-v1";
+function guardarEstado() {
+  try {
+    localStorage.setItem(CLAVE_ESTADO, JSON.stringify({
+      capaOn: S.capaOn, catOn: S.catOn, abiertoArbol: S.abiertoArbol, base: S.baseNombre, deptosOn: S.deptosOn,
+    }));
+  } catch (e) { /* sin almacenamiento: se usan los valores de siempre */ }
+}
+function leerEstado() {
+  try {
+    const g = JSON.parse(localStorage.getItem(CLAVE_ESTADO) || "null");
+    if (!g) return;
+    for (const k of ["capaOn", "catOn", "abiertoArbol"]) {
+      for (const [id, v] of Object.entries(g[k] || {})) if (id in S[k]) S[k][id] = !!v;
+    }
+    if (typeof g.base === "string") S.baseNombre = g.base;
+    if (typeof g.deptosOn === "boolean") S.deptosOn = g.deptosOn;
+  } catch (e) { /* estado guardado inválido: se ignora */ }
+}
 const partesDO = (v) => String(v || "").split(/[\/,;]+|\s+y\s+/).map((p) => p.trim()).filter(Boolean);
 
 function esMia(o) {
@@ -347,6 +369,7 @@ function pintarCapas() {
     if (el.dataset.capa) S.capaOn[el.dataset.capa] = el.checked;
     if (el.dataset.cat) S.catOn[el.dataset.cat] = el.checked;
     if (el.name === "base") {
+      S.baseNombre = el.value;
       for (const [k, l] of Object.entries(S.base)) k === el.value ? l.addTo(S.mapa) : l.remove();
       $("#mapa").classList.toggle("fondo-oscuro", el.value.startsWith("Gris"));
     }
@@ -355,7 +378,7 @@ function pintarCapas() {
   };
   p.onclick = (ev) => {
     const b = ev.target.closest("[data-plegar]");
-    if (b) { S.abiertoArbol[b.dataset.plegar] = !S.abiertoArbol[b.dataset.plegar]; pintarCapas(); }
+    if (b) { S.abiertoArbol[b.dataset.plegar] = !S.abiertoArbol[b.dataset.plegar]; guardarEstado(); pintarCapas(); }
   };
 }
 
@@ -417,6 +440,7 @@ function pintarPanel(rehacerFiltros = true) {
 }
 
 function pintar(rehacerFiltros = true) {
+  guardarEstado();
   pintarMapa(pintarPanel(rehacerFiltros));
 }
 
@@ -468,22 +492,28 @@ function pintarVencimientos() {
 function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: true, attributionControl: true }).setView([-32.6, -56.0], 7);
-  S.base["Gris (como QGIS)"] = L.layerGroup().addTo(S.mapa);
+  leerEstado();
+  S.base["Gris (como QGIS)"] = L.layerGroup();
   S.base["Calles"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19, attribution: "© OpenStreetMap" });
   S.base["Satélite"] = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 19, attribution: "Imágenes © Esri" });
-  $("#mapa").classList.add("fondo-oscuro");
-  S.mapa.createPane("deptos").style.zIndex = 350;
-  S.deptos = L.layerGroup().addTo(S.mapa);
-  S.deptosOn = true;
+  if (!S.base[S.baseNombre]) S.baseNombre = "Gris (como QGIS)";
+  S.base[S.baseNombre].addTo(S.mapa);
+  $("#mapa").classList.toggle("fondo-oscuro", S.baseNombre.startsWith("Gris"));
+  // Departamentos va de fondo: su panel queda debajo de los símbolos (que van en markerPane, 600).
+  const panel = S.mapa.createPane("deptos");
+  panel.style.zIndex = 350;
+  panel.style.pointerEvents = "none";
+  S.deptos = L.layerGroup();
+  if (S.deptosOn) S.deptos.addTo(S.mapa);
   fetch("datos/departamentos.geojson").then((r) => r.json()).then((gj) => {
     L.geoJSON(gj, {
       pane: "deptos", interactive: false, pointToLayer: () => null,
       style: { color: "#626262", weight: 1, fill: false },
       onEachFeature: (f, capa) => {
         const nombre = String(f.properties.nombre || "").toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase());
-        L.marker(capa.getBounds().getCenter(), { interactive: false, keyboard: false,
+        L.marker(capa.getBounds().getCenter(), { pane: "deptos", interactive: false, keyboard: false,
           icon: L.divIcon({ className: "depto-nombre", html: `<span>${esc(nombre)}</span>`, iconSize: [0, 0] }) }).addTo(S.deptos);
       },
     }).addTo(S.deptos);
