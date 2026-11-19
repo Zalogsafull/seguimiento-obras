@@ -9,20 +9,49 @@ const CAT = {
   hormigonado: { nombre: "Hormigonado",             color: "#d7191c", grupo: "obra" },
   montaje:     { nombre: "Montaje",                 color: "#f2d024", grupo: "obra" },
   infra:       { nombre: "Obra de infraestructura", color: "#2e9e44", grupo: "obra" },
-  plazo:       { nombre: "Recepción en plazo",      color: "#2e9e44", grupo: "recepcion", cuadrado: true },
-  r6:          { nombre: "Recepción en 3 a 6 meses", color: "#f2d024", grupo: "recepcion", cuadrado: true },
-  r3:          { nombre: "Recepción en menos de 3 meses", color: "#f08a24", grupo: "recepcion", cuadrado: true },
-  vencida:     { nombre: "Recepción vencida",       color: "#c1272d", grupo: "recepcion", cuadrado: true },
-  sinfecha:    { nombre: "Terminada sin fecha de fin", color: "#9b59b6", grupo: "recepcion", cuadrado: true },
-  recibida:    { nombre: "Recibida",                color: "#9e9e9e", grupo: "cerrada", cuadrado: true },
-  terminada:   { nombre: "Terminada",               color: "#9e9e9e", grupo: "cerrada", cuadrado: true },
+  r6:          { nombre: "Recepción en 3 a 6 meses", color: "#f2d024", grupo: "recepcion", recepcion: true },
+  r3:          { nombre: "Recepción en menos de 3 meses", color: "#f08a24", grupo: "recepcion", recepcion: true },
+  vencida:     { nombre: "Recepción vencida",       color: "#c1272d", grupo: "recepcion", recepcion: true },
+  plazo:       { nombre: "Terminada, recepción en plazo", color: "#838383", grupo: "cerrada", terminada: true },
+  sinfecha:    { nombre: "Terminada, sin fecha de fin", color: "#838383", grupo: "cerrada", terminada: true },
+  recibida:    { nombre: "Recibida",                color: "#838383", grupo: "cerrada", terminada: true },
+  terminada:   { nombre: "Terminada",               color: "#838383", grupo: "cerrada", terminada: true },
 };
 const GRUPOS = [
   ["proyecto", "En proyecto", true],
   ["obra", "En obra", true],
   ["recepcion", "Recepción pendiente", true],
-  ["cerrada", "Recibidas y terminadas", false],
+  ["cerrada", "Terminadas", false],
 ];
+
+// Formas de QGIS: MÁSTIL triángulo, MONOPOLO círculo, Obras cuadrado, COSITIO asterisco.
+function forma(tipo, o) {
+  if (tipo === "obra") return String(o.descripcion || "").toUpperCase() === "COSITIO" ? "asterisco" : "cuadrado";
+  return /^M[ÁA]STIL/i.test(o.estructura || "") ? "triangulo" : "circulo";
+}
+function svgForma(f, relleno, borde, px, grosor = 1.2) {
+  const h = px / 2, r = h - grosor;
+  let d;
+  if (f === "triangulo") d = `<polygon points="${h},${grosor} ${px - grosor},${px - grosor} ${grosor},${px - grosor}"/>`;
+  else if (f === "cuadrado") d = `<rect x="${grosor + 1}" y="${grosor + 1}" width="${px - 2 * grosor - 2}" height="${px - 2 * grosor - 2}"/>`;
+  else if (f === "asterisco") {
+    const pts = [];
+    for (let i = 0; i < 16; i++) {
+      const a = (Math.PI / 8) * i - Math.PI / 2, rr = i % 2 ? r * 0.42 : r;
+      pts.push(`${(h + rr * Math.cos(a)).toFixed(2)},${(h + rr * Math.sin(a)).toFixed(2)}`);
+    }
+    d = `<polygon points="${pts.join(" ")}"/>`;
+  } else d = `<circle cx="${h}" cy="${h}" r="${r}"/>`;
+  return `<svg width="${px}" height="${px}" viewBox="0 0 ${px} ${px}" aria-hidden="true"><g fill="${relleno}" stroke="${borde}" stroke-width="${grosor}" stroke-linejoin="round">${d}</g></svg>`;
+}
+function simbolo(tipo, o, cat, escala = 1) {
+  const c = CAT[cat], f = forma(tipo, o);
+  const grande = c.recepcion || f === "asterisco";
+  const px = Math.round((grande ? 18 : 13) * escala);
+  const borde = c.recepcion ? "#e0c200" : c.terminada ? "#1a1a1a" : "#7a7a7a";
+  return svgForma(f, c.color, borde, px, c.recepcion ? 1.8 : 1.2);
+}
+
 const ESCALERA = {
   estructura: ["proyecto", "aprobado_e", "hormigonado", "montaje", "infra", "recepcion", "recibida"],
   obra: ["proyecto", "aprobado_o", "infra", "terminada"],
@@ -223,7 +252,7 @@ function filaHtml({ tipo, o, cat }, eti = "") {
     : [o.sala, o.localidad, o.director_obra].filter(Boolean).join(", ");
   const actual = S.abierta && S.abierta.tipo === tipo && S.abierta.id === o.id;
   return `<li class="fila" tabindex="0" data-tipo="${tipo}" data-id="${o.id}" aria-current="${actual}">
-    <span class="punto${c.cuadrado ? " cuadrado" : ""}" style="background:${c.color}"></span>
+    <span class="sim">${simbolo(tipo, o, cat, 0.95)}</span>
     <span class="cod">${esc(o.codigo)}</span>
     <span class="eti">${eti || esc(c.nombre)}</span>
     <span class="sub">${esc(sub) || (tipo === "obra" ? "Obra" : "Estructura")}</span></li>`;
@@ -258,16 +287,16 @@ function pintarVencimientos() {
     if (S.mias && !esMia(o)) continue;
     base.push({ tipo, o, cat: categoria(tipo, o) });
   }
-  const rec = base.filter((x) => x.tipo === "estructura" && CAT[x.cat].grupo === "recepcion" && x.o.dias_para_recepcion != null && x.o.dias_para_recepcion < 180)
+  const rec = base.filter((x) => x.tipo === "estructura" && CAT[x.cat].recepcion && x.o.dias_para_recepcion != null)
     .sort((a, b) => a.o.dias_para_recepcion - b.o.dias_para_recepcion);
   const hit = base.filter((x) => x.o.proximo_vencimiento).sort((a, b) => a.o.proximo_vencimiento.localeCompare(b.o.proximo_vencimiento));
   const dias = (d) => (d < 0 ? `vencida hace ${-d} d` : d === 0 ? "vence hoy" : `faltan ${d} d`);
   const cont = $("#vencimientos");
   cont.className = "venc";
   cont.innerHTML = `
-    <h3>Recepciones de los próximos 6 meses</h3>
+    <h3>Recepciones vencidas y de los próximos 6 meses</h3>
     <ol class="lista">${rec.length ? rec.map((x) => filaHtml(x, `<span class="${x.o.dias_para_recepcion < 0 ? "mal" : ""}">${dias(x.o.dias_para_recepcion)}</span>`)).join("")
-      : `<li class="vacio">Ninguna recepción vence en los próximos 6 meses.</li>`}</ol>
+      : `<li class="vacio">No hay recepciones vencidas ni que venzan en los próximos 6 meses.</li>`}</ol>
     <h3>Hitos con fecha o recordatorio</h3>
     <ol class="lista">${hit.length ? hit.map((x) => {
       const d = Math.round((new Date(x.o.proximo_vencimiento + "T12:00:00") - new Date(hoy() + "T12:00:00")) / 864e5);
@@ -286,22 +315,28 @@ function prepararMapa() {
   const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 19, attribution: "Imágenes © Esri" });
   L.control.layers({ "Calles": calles, "Satélite": sat }, null, { position: "topright" }).addTo(S.mapa);
-  const lejos = () => $("#mapa").classList.toggle("lejos", S.mapa.getZoom() < 9);
+  const lejos = () => $("#mapa").classList.toggle("lejos", S.mapa.getZoom() < 8);
   S.mapa.on("zoomend", lejos); lejos();
-  $("#leyenda").innerHTML = `<b>Estructuras y obras en curso</b>` +
-    ["proyecto", "aprobado_e", "hormigonado", "montaje", "infra"].map(leyendaFila).join("") +
-    `<b>Terminadas: recepción a 2 años</b>` + ["plazo", "r6", "r3", "vencida", "recibida"].map(leyendaFila).join("") +
-    `<div style="margin-top:4px;color:var(--tinta-suave)">Rombo: capa Obras</div>`;
+  const ej = (e, d = "") => ({ estructura: e, descripcion: d });
+  $("#leyenda").innerHTML = `<b>En proyecto y en obra</b>` +
+    ["proyecto", "aprobado_e", "hormigonado", "montaje", "infra"].map((k) => leyendaFila("estructura", ej("MONOPOLO"), k)).join("") +
+    `<b>Recepción a 2 años</b>` + ["r6", "r3", "vencida"].map((k) => leyendaFila("estructura", ej("MONOPOLO"), k)).join("") +
+    leyendaFila("estructura", ej("MONOPOLO"), "recibida", "Terminada o recibida") +
+    `<b>Formas</b><div class="formas">` +
+    [["estructura", ej("MÁSTIL"), "Mástil"], ["estructura", ej("MONOPOLO"), "Monopolo"], ["obra", ej("", "OBRA"), "Obra"], ["obra", ej("", "COSITIO"), "Cositio"]]
+      .map(([t, o, n]) => `<span>${svgForma(forma(t, o), "#ffffff", "#52626D", forma(t, o) === "asterisco" ? 15 : 12)}${n}</span>`).join("") + `</div>`;
 }
-const leyendaFila = (k) => `<div><span class="punto${CAT[k].cuadrado ? " cuadrado" : ""}" style="background:${CAT[k].color}"></span>${CAT[k].nombre}</div>`;
+const leyendaFila = (t, o, k, n) => `<div>${simbolo(t, o, k, 0.85)}${n || CAT[k].nombre}</div>`;
 
 function icono(tipo, o, cat) {
   const c = CAT[cat];
   const activo = S.abierta && S.abierta.tipo === tipo && S.abierta.id === o.id;
+  const grande = c.recepcion || forma(tipo, o) === "asterisco";
+  const px = grande ? 18 : 13;
   return L.divIcon({
-    className: `mk${c.cuadrado ? " cuadrado" : ""}${tipo === "obra" ? " obra" : ""}${activo ? " activo" : ""}`,
-    html: `<i style="background:${c.color}"></i><span>${esc(o.codigo)}</span>`,
-    iconSize: [14, 14], iconAnchor: [7, 7],
+    className: `mk${activo ? " activo" : ""}`,
+    html: `${simbolo(tipo, o, cat)}<span style="left:${px + 3}px">${esc(o.codigo)}</span>`,
+    iconSize: [px, px], iconAnchor: [px / 2, px / 2],
   });
 }
 
@@ -352,14 +387,14 @@ function cerrarFicha() {
 function pintarFicha(tipo, o, hitos, notas) {
   const cat = categoria(tipo, o), c = CAT[cat];
   const pasos = ESCALERA[tipo];
-  const clave = CAT[cat].grupo === "recepcion" ? "recepcion" : cat;
+  const clave = ["r6", "r3", "vencida", "plazo", "sinfecha"].includes(cat) ? "recepcion" : cat === "terminada" ? "terminada" : cat;
   const pos = Math.max(0, pasos.indexOf(clave));
   const tramos = pasos.map((p, i) => {
     const col = CAT[p]?.color || c.color;
     const cls = i < pos ? "tramo hecho" : i === pos ? "tramo actual" : "tramo";
     return `<span class="${cls}" style="--c:${i === pos ? c.color : col}" title="${esc(CAT[p]?.nombre || NOMBRE_TRAMO[p])}"></span>`;
   }).join("");
-  const detalle = tipo === "estructura" && CAT[cat].grupo === "recepcion" && o.dias_para_recepcion != null
+  const detalle = tipo === "estructura" && (c.recepcion || cat === "plazo") && o.dias_para_recepcion != null
     ? (o.dias_para_recepcion < 0 ? `vencida hace ${-o.dias_para_recepcion} días` : `vence el ${fecha(o.vence_recepcion)}`) : "";
 
   const datos = tipo === "estructura"
@@ -382,7 +417,7 @@ function pintarFicha(tipo, o, hitos, notas) {
       <p class="codigo">${esc(o.codigo)}</p>
       <p class="tipo-obra">${tipo === "estructura" ? "Estructura" : "Obra"}${o.localidad ? ", " + esc(o.localidad) : ""}</p>
       <div class="escalera" aria-hidden="true">${tramos}</div>
-      <p class="etapa-actual"><span class="punto${c.cuadrado ? " cuadrado" : ""}" style="background:${c.color}"></span>${esc(c.nombre)} <small>${esc(detalle)}</small></p>
+      <p class="etapa-actual">${simbolo(tipo, o, cat)}${esc(c.nombre)} <small>${esc(detalle)}</small></p>
     </div>
 
     <div class="ficha-bloque">
