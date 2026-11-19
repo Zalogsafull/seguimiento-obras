@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-19-2";
+import { crearApi } from "./api.js?v=2026-11-19-3";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -306,6 +306,7 @@ async function entrarApp() {
   $("#boton-usuarios").onclick = abrirAdmin;
   $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
   prepararMapa();
+  prepararPanel();
   await cargar();
 }
 
@@ -771,5 +772,82 @@ $("#instalar").onclick = async () => {
   $("#instalar").hidden = true;
 };
 window.addEventListener("appinstalled", () => { $("#instalar").hidden = true; aviso("App instalada"); });
+
+// ------------------------------------------------------------ panel: tamaño y minimizar
+// PC: arrastrar el borde derecho cambia el ancho; "‹" lo oculta.
+// Celular: arrastrar la agarradera de arriba cambia el alto; tocarla o "▾" lo minimiza.
+const CLAVE_UI = "obras-oici-panel-v1";
+const movil = matchMedia("(max-width: 760px)");
+const UI = { ancho: 380, alto: Math.round(innerHeight * 0.45), plegado: false };
+try { Object.assign(UI, JSON.parse(localStorage.getItem(CLAVE_UI) || "{}")); } catch (e) { /* valores de siempre */ }
+const guardarUI = () => { try { localStorage.setItem(CLAVE_UI, JSON.stringify(UI)); } catch (e) { /* sin almacenamiento */ } };
+const HOJA_MIN = 70;
+
+function aplicarUI() {
+  const raiz = document.documentElement.style;
+  const app = $("#vista-app");
+  UI.ancho = Math.min(Math.max(UI.ancho, 280), Math.min(680, innerWidth - 200));
+  UI.alto = Math.min(Math.max(UI.alto, HOJA_MIN + 60), innerHeight - 90);
+  raiz.setProperty("--panel", UI.ancho + "px");
+  raiz.setProperty("--panel-ancho", movil.matches ? "100%" : UI.ancho + "px");
+  raiz.setProperty("--hoja", UI.alto + "px");
+  app.classList.toggle("plegado", UI.plegado);
+  const b = $("#plegar-panel");
+  b.textContent = movil.matches ? (UI.plegado ? "▴" : "▾") : "‹";
+  b.setAttribute("aria-label", UI.plegado ? "Mostrar panel" : "Minimizar panel");
+  b.title = b.getAttribute("aria-label");
+  $("#abrir-panel").hidden = !(UI.plegado && !movil.matches);
+  setTimeout(() => S.mapa && S.mapa.invalidateSize(), 220);
+}
+
+function plegar(v) { UI.plegado = v; guardarUI(); aplicarUI(); }
+
+function prepararPanel() {
+  const asa = $("#asa"), panel = $("#panel");
+  $("#plegar-panel").onclick = () => plegar(!UI.plegado);
+  $("#abrir-panel").onclick = () => plegar(false);
+  // en el celular, tocar una pestaña con el panel minimizado lo vuelve a abrir
+  $("#pestanas").addEventListener("click", () => { if (UI.plegado && movil.matches) plegar(false); });
+  let inicio = null;
+  asa.onpointerdown = (ev) => {
+    inicio = { x: ev.clientX, y: ev.clientY, movio: false };
+    asa.setPointerCapture(ev.pointerId);
+    asa.classList.add("arrastrando"); panel.classList.add("arrastrando");
+  };
+  asa.onpointermove = (ev) => {
+    if (!inicio) return;
+    if (Math.abs(ev.clientX - inicio.x) + Math.abs(ev.clientY - inicio.y) > 4) inicio.movio = true;
+    if (!inicio.movio) return;
+    if (movil.matches) {
+      const alto = innerHeight - ev.clientY;
+      if (alto < HOJA_MIN + 30) { UI.plegado = true; } else { UI.plegado = false; UI.alto = alto; }
+    } else {
+      UI.ancho = ev.clientX;
+      UI.plegado = false;
+    }
+    aplicarUI();
+  };
+  const soltar = () => {
+    if (!inicio) return;
+    if (!inicio.movio && movil.matches) UI.plegado = !UI.plegado;
+    inicio = null;
+    asa.classList.remove("arrastrando"); panel.classList.remove("arrastrando");
+    guardarUI(); aplicarUI();
+  };
+  asa.onpointerup = soltar;
+  asa.onpointercancel = soltar;
+  asa.onkeydown = (ev) => {
+    const paso = ev.shiftKey ? 60 : 20;
+    if (movil.matches) {
+      if (ev.key === "ArrowUp") UI.alto += paso; else if (ev.key === "ArrowDown") UI.alto -= paso; else return;
+    } else {
+      if (ev.key === "ArrowRight") UI.ancho += paso; else if (ev.key === "ArrowLeft") UI.ancho -= paso; else return;
+    }
+    ev.preventDefault(); UI.plegado = false; guardarUI(); aplicarUI();
+  };
+  movil.addEventListener("change", aplicarUI);
+  addEventListener("resize", aplicarUI);
+  aplicarUI();
+}
 
 iniciar();

@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Seguimiento de obras OICI</title>
-  <meta name="theme-color" content="#1B2A35">
+  <meta name="theme-color" content="#1A1A1A">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="iconos/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="styles.css?v=2026-11-19-2">
+  <link rel="stylesheet" href="styles.css?v=2026-11-19-3">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 9 29h3l1.6-6h4.8l1.6 6h3L16 3Zm0 8 1.8 9h-3.6L16 11Z' fill='%231B2A35'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -84,6 +84,7 @@
     </header>
 
     <aside class="panel" id="panel">
+      <div class="asa" id="asa" role="separator" aria-label="Arrastrar para cambiar el tamaño del panel" tabindex="0"></div>
       <div class="panel-cabeza">
         <div class="pestanas" role="tablist" id="pestanas">
           <button role="tab" data-tab="capas" aria-selected="true">Capas</button>
@@ -91,6 +92,7 @@
           <button role="tab" data-tab="lista" aria-selected="false">Lista <span class="cuenta" id="cuenta-lista"></span></button>
           <button role="tab" data-tab="venc" aria-selected="false">Vencimientos</button>
         </div>
+        <button class="plegar-panel" id="plegar-panel" type="button" aria-label="Minimizar panel" title="Minimizar panel">‹</button>
       </div>
       <div class="panel-cuerpo">
         <div data-panel="capas" id="panel-capas"></div>
@@ -102,6 +104,7 @@
 
     <main class="mapa-zona">
       <div id="mapa" aria-label="Mapa de obras"></div>
+      <button class="abrir-panel" id="abrir-panel" type="button" hidden>Capas y filtros</button>
     </main>
 
     <section class="admin" id="admin" hidden></section>
@@ -110,6 +113,6 @@
 
   <div class="avisos" id="avisos" aria-live="polite"></div>
   <script src="vendor/leaflet/leaflet.js"></script>
-  <script type="module" src="app.js?v=2026-11-19-2"></script>
+  <script type="module" src="app.js?v=2026-11-19-3"></script>
 </body>
 </html>
