@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-19-3";
+import { crearApi } from "./api.js?v=2026-11-19-4";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -109,7 +109,7 @@ const S = {
   f: { mias: false, texto: "", director: "", licitacion: "", estructura: "", anio: "" },
   abierta: null, tab: "capas",
   mapa: null, base: {}, marcadores: new Map(), primeraVez: true,
-  baseNombre: "Gris (como QGIS)", deptosOn: true,
+  baseNombre: "Gris (como QGIS)", deptosOn: true, callesGris: 0.3,
 };
 const editor = () => S.perfil?.rol === "EDITOR";
 
@@ -119,6 +119,7 @@ function guardarEstado() {
   try {
     localStorage.setItem(CLAVE_ESTADO, JSON.stringify({
       capaOn: S.capaOn, catOn: S.catOn, abiertoArbol: S.abiertoArbol, base: S.baseNombre, deptosOn: S.deptosOn,
+      callesGris: S.callesGris,
     }));
   } catch (e) { /* sin almacenamiento: se usan los valores de siempre */ }
 }
@@ -131,6 +132,7 @@ function leerEstado() {
     }
     if (typeof g.base === "string") S.baseNombre = g.base;
     if (typeof g.deptosOn === "boolean") S.deptosOn = g.deptosOn;
+    if (typeof g.callesGris === "number") S.callesGris = Math.min(Math.max(g.callesGris, 0), 0.8);
   } catch (e) { /* estado guardado inválido: se ignora */ }
 }
 const partesDO = (v) => String(v || "").split(/[\/,;]+|\s+y\s+/).map((p) => p.trim()).filter(Boolean);
@@ -361,11 +363,20 @@ function pintarCapas() {
     <div class="arbol-grupo"><p class="nodo nodo-grupo">Formas</p><div class="formas">${formas}</div></div>
     <div class="arbol-grupo"><p class="nodo nodo-grupo">Mapa base</p>
       <div class="bases">${Object.keys(S.base).map((b) => `<label class="nodo"><input type="radio" name="base" value="${b}" ${S.mapa.hasLayer(S.base[b]) ? "checked" : ""}> ${b}</label>`).join("")}</div>
+      ${S.baseNombre.startsWith("Gris") ? `<label class="rango">Calles en el fondo gris <span id="valor-calles">${Math.round(S.callesGris * 100)}%</span>
+        <input type="range" name="calles" min="0" max="80" step="5" value="${Math.round(S.callesGris * 100)}"></label>` : ""}
       <label class="nodo"><input type="checkbox" name="deptos" ${S.deptosOn ? "checked" : ""}> Departamentos</label></div>
     ${filtrosActivos() ? `<p class="nota aviso-filtro">Hay ${filtrosActivos()} filtro${filtrosActivos() > 1 ? "s" : ""} activo${filtrosActivos() > 1 ? "s" : ""}: las cantidades ya los tienen en cuenta.</p>` : ""}`;
   p.querySelectorAll('[data-medio="true"]').forEach((el) => (el.indeterminate = true));
+  const r = p.querySelector("input[name=calles]");
+  if (r) r.oninput = () => {
+    S.callesGris = Number(r.value) / 100;
+    S.base["Gris (como QGIS)"].setOpacity(S.callesGris);
+    $("#valor-calles").textContent = r.value + "%";
+  };
   p.onchange = (ev) => {
     const el = ev.target;
+    if (el.name === "calles") { guardarEstado(); return; }
     if (el.dataset.grupo) CAPAS.filter((c) => c.grupo === el.dataset.grupo).forEach((c) => (S.capaOn[c.id] = el.checked));
     if (el.dataset.capa) S.capaOn[el.dataset.capa] = el.checked;
     if (el.dataset.cat) S.catOn[el.dataset.cat] = el.checked;
@@ -494,7 +505,9 @@ function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: true, attributionControl: true }).setView([-32.6, -56.0], 7);
   leerEstado();
-  S.base["Gris (como QGIS)"] = L.layerGroup();
+  // Gris como QGIS: calles en escala de grises invertida, muy atenuadas sobre el gris #212121.
+  S.base["Gris (como QGIS)"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "© OpenStreetMap", className: "tiles-gris", opacity: S.callesGris });
   S.base["Calles"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19, attribution: "© OpenStreetMap" });
   S.base["Satélite"] = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
@@ -553,12 +566,18 @@ function pintarMapa(v) {
 }
 
 // ------------------------------------------------------------ ficha
+const barraCerrar = (texto) => `<div class="cabeza-acciones">
+  <button type="button" class="volver"><span aria-hidden="true">‹</span> ${texto}</button>
+  <button type="button" class="cerrar" aria-label="Cerrar" title="Cerrar">✕</button></div>`;
+function enlazarCerrar(cont, fn) {
+  cont.querySelectorAll(".volver, .cerrar").forEach((b) => (b.onclick = fn));
+}
 async function abrirFicha(tipo, id) {
   S.abierta = { tipo, id };
   const ficha = $("#ficha");
   ficha.hidden = false;
-  ficha.innerHTML = `<div class="ficha-cabeza"><button class="volver">Volver a la lista</button><p class="tipo-obra">Cargando…</p></div>`;
-  $(".volver", ficha).onclick = cerrarFicha;
+  ficha.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver a la lista")}<p class="tipo-obra">Cargando…</p></div>`;
+  enlazarCerrar(ficha, cerrarFicha);
   pintar();
   try {
     const [o, hitos, notas] = await Promise.all([S.api.una(tipo, id), S.api.hitos(tipo, id), S.api.cuaderno(tipo, id)]);
@@ -608,7 +627,7 @@ function pintarFicha(tipo, o, hitos, notas) {
   const ficha = $("#ficha");
   ficha.innerHTML = `
     <div class="ficha-cabeza">
-      <button class="volver">Volver a la lista</button>
+      ${barraCerrar("Volver a la lista")}
       <p class="codigo">${esc(o.codigo)}</p>
       <p class="tipo-obra">${tipo === "estructura" ? "Estructura" : "Obra"}${o.localidad ? ", " + esc(o.localidad) : ""}</p>
       <div class="escalera" aria-hidden="true">${tramos}</div>
@@ -642,7 +661,7 @@ function pintarFicha(tipo, o, hitos, notas) {
         <p class="nota" style="margin-top:6px">Pasá a "En obra" cuando arranca. El fin se marca con su hito.</p>` : ""}
     </div>`;
 
-  $(".volver", ficha).onclick = cerrarFicha;
+  enlazarCerrar(ficha, cerrarFicha);
   ficha.querySelectorAll(".hito").forEach((row) => enlazarHito(row, tipo, o.id));
   const fn = $("#form-nota", ficha);
   if (fn) fn.onsubmit = async (ev) => {
@@ -697,8 +716,8 @@ function enlazarHito(row, tipo, obraId) {
 async function abrirAdmin() {
   const caja = $("#admin");
   caja.hidden = false;
-  caja.innerHTML = `<div class="ficha-cabeza"><button class="volver">Volver al mapa</button><h2 class="admin-titulo">Usuarios</h2></div><p class="nota" style="padding:0 16px">Cargando…</p>`;
-  $(".volver", caja).onclick = () => { caja.hidden = true; };
+  caja.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Usuarios</h2></div><p class="nota" style="padding:0 16px">Cargando…</p>`;
+  enlazarCerrar(caja, () => { caja.hidden = true; });
   let cuentas;
   try { cuentas = await S.api.adminUsuarios(); }
   catch (e) {
@@ -711,7 +730,7 @@ async function abrirAdmin() {
   const pend = cuentas.filter((c) => !c.habilitado), con = cuentas.filter((c) => c.habilitado);
   const rolSel = (r) => `<select name="rol"><option value="EDITOR" ${r === "EDITOR" ? "selected" : ""}>Editor</option><option value="LECTOR" ${r === "LECTOR" ? "selected" : ""}>Solo lectura</option></select>`;
   const reg = (c) => (c.registrado ? "se registró el " + fecha(String(c.registrado).slice(0, 10)) : "");
-  caja.innerHTML = `<div class="ficha-cabeza"><button class="volver">Volver al mapa</button><h2 class="admin-titulo">Usuarios</h2>
+  caja.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Usuarios</h2>
       <p class="nota">Quien se registra en la web aparece acá. Habilitalo para que vea las obras.</p></div>
     <datalist id="lista-do">${dirs.map((d) => `<option value="${esc(d)}">`).join("")}</datalist>
     <div class="ficha-bloque">
@@ -735,7 +754,7 @@ async function abrirAdmin() {
           ${c.user_id === S.perfil.user_id ? "" : `<button class="boton boton-peligro" type="button" data-quitar>Quitar acceso</button>`}</div>
         </form>`).join("")}
     </div>`;
-  $(".volver", caja).onclick = () => { caja.hidden = true; };
+  enlazarCerrar(caja, () => { caja.hidden = true; });
   caja.querySelectorAll(".cuenta-form").forEach((f) => {
     f.onsubmit = async (ev) => {
       ev.preventDefault();
