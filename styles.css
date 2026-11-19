@@ -163,3 +163,48 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .ficha { animation: entra .18s ease-out; }
   @keyframes entra { from { transform: translateX(-12px); opacity: .6; } }
 }
+
+/* ---------- árbol de capas (como el panel de QField) ---------- */
+#panel-capas { padding: 6px 0 16px; }
+.arbol-grupo { padding: 6px 12px 8px; border-bottom: 1px solid #E3E8EA; }
+.nodo { display: flex; align-items: center; gap: 8px; padding: 5px 4px; font-size: 14px; cursor: pointer; margin: 0; }
+.nodo input { margin: 0; accent-color: var(--acento); width: 16px; height: 16px; flex: none; }
+.nodo-grupo { font: 600 13px/1.2 var(--cond); color: var(--tinta-suave); letter-spacing: .02em; padding-top: 8px; }
+.nodo-capa { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 4px; padding: 3px 0; }
+.nodo-capa label { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.nodo .n, .nodo-capa .n { margin-left: auto; font-size: 12px; color: var(--tinta-suave); font-variant-numeric: tabular-nums; }
+.plegar { border: 0; background: none; width: 22px; height: 22px; padding: 0; cursor: pointer; color: var(--tinta-suave); font-size: 13px; }
+.cats { list-style: none; margin: 0 0 4px; padding: 0 0 0 26px; }
+.cats .nodo { padding: 3px 4px; font-size: 13.5px; }
+.cats .sim { width: 18px; flex: none; }
+.arbol-capa.apagada .cats { opacity: .5; }
+.formas, .bases { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 2px 4px; font-size: 13px; }
+.formas span { display: inline-flex; align-items: center; gap: 6px; }
+.aviso-filtro { margin: 10px 16px 0; }
+
+/* ---------- filtros ---------- */
+#panel-filtros { padding: 14px 16px 20px; }
+.form.filtros { gap: 14px; }
+.interruptor-fila { display: flex !important; grid-template-columns: none; gap: 10px !important; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 8px; color: var(--tinta) !important; font-size: 14px !important; cursor: pointer; }
+.interruptor-fila:has(input:checked) { border-color: var(--acento); background: var(--acento-claro); }
+.interruptor-fila input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--acento); }
+.interruptor-fila small { color: var(--tinta-suave); }
+.resumen { margin: 0; padding: 10px 16px; font-size: 13px; color: var(--tinta-suave); border-bottom: 1px solid #E3E8EA; }
+.pestanas .cuenta, h2 .cuenta { font-size: 12px; font-weight: 500; color: var(--tinta-suave); }
+.panel-cabeza { padding-bottom: 0; }
+.panel-cabeza .pestanas { margin-bottom: 0; border-bottom: 0; }
+.panel-cabeza .pestanas button { padding: 8px 10px; }
+
+/* ---------- usuarios ---------- */
+.admin { position: absolute; z-index: 1000; top: var(--barra); left: 0; bottom: 0; width: var(--panel); background: var(--blanco); border-right: 1px solid var(--linea); overflow: auto; }
+.admin-titulo { font: 700 30px/1.1 var(--cond); margin: 6px 0 4px; }
+.cuenta-form { padding: 12px 0; border-bottom: 1px solid #EEF1F2; gap: 10px; }
+.cuenta-form:last-child { border-bottom: 0; }
+.cuenta-mail { margin: 0; font-size: 14px; word-break: break-all; }
+.cuenta-mail small { color: var(--tinta-suave); }
+.dos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.boton-peligro { color: var(--error); border-color: #E5B9BA; }
+.boton-peligro:hover { border-color: var(--error); }
+.etiqueta { font-size: 11px; font-weight: 600; background: var(--acento-claro); color: var(--acento); padding: 1px 6px; border-radius: 999px; }
+@media (max-width: 760px) { .admin { width: 100%; } }

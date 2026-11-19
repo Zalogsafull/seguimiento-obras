@@ -15,16 +15,17 @@ mapa por etapa, hitos para tildar, cuaderno de obra, vencimientos de recepción 
 
 ## Dar acceso a una persona
 
-1. Que entre a la web y use **Crear cuenta**.
-2. En Neon > SQL Editor, buscá su id: `SELECT id, email FROM neon_auth."user";`
-3. Autorizala:
+Desde la web: **Usuarios** (botón arriba, solo para administradores).
 
-```sql
-INSERT INTO public.usuarios_web (user_id, nombre, rol, iniciales_do)
-VALUES ('ID_COPIADO', 'Nombre', 'EDITOR', 'G.S.');   -- o 'LECTOR'
-```
+1. La persona entra a la web y usa **Crear cuenta**.
+2. Aparece en *Usuarios > Esperando habilitación*. Elegí su permiso (Editor o Solo lectura) y sus
+   iniciales tal como figuran en el campo D.O. (para "Mis obras"), y tocá **Habilitar**.
+3. En *Con acceso* se cambia el permiso o las iniciales, o se quita el acceso.
 
-`iniciales_do` tiene que coincidir con el campo D.O. de las capas para que funcione "Mis obras".
+## Base de datos
+
+Los SQL están en `sql/`, en el orden en que se corrieron en Neon. Para la pantalla de usuarios hace
+falta `sql/parte3_admin_usuarios.sql` y después *Data API > Refresh schema cache*.
 
 ## Archivos
 

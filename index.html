@@ -54,11 +54,8 @@
   <div id="vista-app" class="app" hidden>
     <header class="barra">
       <h1 class="marca">Obras <span>OICI</span></h1>
-      <label class="interruptor" title="Mostrar solo las obras donde figurás como director de obra">
-        <input type="checkbox" id="mis-obras">
-        <span>Mis obras</span>
-      </label>
       <div class="usuario">
+        <button class="boton boton-chico" id="boton-usuarios" hidden>Usuarios</button>
         <span id="nombre-usuario"></span>
         <button class="boton boton-chico" id="salir">Salir</button>
       </div>
@@ -66,27 +63,26 @@
 
     <aside class="panel" id="panel">
       <div class="panel-cabeza">
-        <div class="pestanas" role="tablist">
-          <button role="tab" id="tab-lista" aria-selected="true">Obras</button>
-          <button role="tab" id="tab-venc" aria-selected="false">Vencimientos</button>
-        </div>
-        <div id="filtros" class="filtros">
-          <input type="search" id="buscar" placeholder="Buscar por código, localidad o licitación" aria-label="Buscar">
-          <div class="chips" id="chips-capa" aria-label="Capas"></div>
-          <div class="chips" id="chips-situacion" aria-label="Situación"></div>
+        <div class="pestanas" role="tablist" id="pestanas">
+          <button role="tab" data-tab="capas" aria-selected="true">Capas</button>
+          <button role="tab" data-tab="filtros" aria-selected="false">Filtros <span class="cuenta" id="cuenta-filtros"></span></button>
+          <button role="tab" data-tab="lista" aria-selected="false">Lista <span class="cuenta" id="cuenta-lista"></span></button>
+          <button role="tab" data-tab="venc" aria-selected="false">Vencimientos</button>
         </div>
       </div>
       <div class="panel-cuerpo">
-        <ol class="lista" id="lista"></ol>
-        <div id="vencimientos" hidden></div>
+        <div data-panel="capas" id="panel-capas"></div>
+        <div data-panel="filtros" id="panel-filtros" hidden></div>
+        <div data-panel="lista" hidden><p class="resumen" id="resumen-lista"></p><ol class="lista" id="lista"></ol></div>
+        <div data-panel="venc" id="vencimientos" hidden></div>
       </div>
     </aside>
 
     <main class="mapa-zona">
       <div id="mapa" aria-label="Mapa de obras"></div>
-      <div class="leyenda" id="leyenda"></div>
     </main>
 
+    <section class="admin" id="admin" hidden></section>
     <section class="ficha" id="ficha" hidden aria-live="polite"></section>
   </div>
 

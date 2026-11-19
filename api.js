@@ -55,6 +55,11 @@ async function crearNeon() {
     async cambiarEstado(tipo, id, valor) {
       chequear(await neon.from(TABLA[tipo]).update({ [CAMPO_ESTADO[tipo]]: valor }).eq("fid", id), "Cambiar estado");
     },
+    async adminUsuarios() { return chequear(await neon.rpc("admin_usuarios"), "Usuarios"); },
+    async adminHabilitar(user_id, nombre, rol, iniciales) {
+      chequear(await neon.rpc("admin_habilitar", { p_user_id: user_id, p_nombre: nombre, p_rol: rol, p_iniciales: iniciales }), "Habilitar");
+    },
+    async adminQuitar(user_id) { chequear(await neon.rpc("admin_quitar", { p_user_id: user_id }), "Quitar acceso"); },
   };
 }
 
@@ -119,6 +124,11 @@ function crearDemo() {
     else if (o.etapa >= 3) o.estado = "CONS";
     if (o.etapa >= 6) { o.recepcion = "RD"; o.dias_para_recepcion = null; }
   };
+  const cuentas = [
+    { user_id: "u-juan", email: "juan.perez@ejemplo.com", nombre_cuenta: "Juan Pérez", registrado: dia(-1), nombre: null, rol: null, iniciales_do: null, admin: false, habilitado: false },
+    { user_id: "demo", email: "dtdoici@gmail.com", nombre_cuenta: "G.S.", registrado: dia(-10), nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true, habilitado: true },
+    { user_id: "u-ana", email: "ana@ejemplo.com", nombre_cuenta: "Ana", registrado: dia(-6), nombre: "Ana", rol: "LECTOR", iniciales_do: "A.R.", admin: false, habilitado: true },
+  ];
   let sesion = null;
   const espera = () => new Promise((r) => setTimeout(r, 120));
   return {
@@ -127,7 +137,15 @@ function crearDemo() {
     async entrar(email) { await espera(); sesion = { id: "demo", email, name: "Gonza" }; return sesion; },
     async crearCuenta(email, p, name) { return this.entrar(email, p, name); },
     async salir() { sesion = null; },
-    async perfil() { return { user_id: "demo", nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S." }; },
+    async perfil() { return { user_id: "demo", nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true }; },
+    async adminUsuarios() { await espera(); return structuredClone(cuentas); },
+    async adminHabilitar(id, nombre, rol, ini) {
+      Object.assign(cuentas.find((c) => c.user_id === id), { nombre, rol, iniciales_do: ini, habilitado: true });
+    },
+    async adminQuitar(id) {
+      if (id === "demo") throw new Error("No podés quitarte el acceso a vos mismo");
+      Object.assign(cuentas.find((c) => c.user_id === id), { nombre: null, rol: null, iniciales_do: null, habilitado: false });
+    },
     async estructuras() { await espera(); return structuredClone(est); },
     async obras() { await espera(); return structuredClone(obr); },
     async una(t, id) { return structuredClone(lista(t).find((x) => x.id === id)); },

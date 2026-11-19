@@ -17,12 +17,18 @@ const CAT = {
   recibida:    { nombre: "Recibida",                color: "#838383", grupo: "cerrada", terminada: true },
   terminada:   { nombre: "Terminada",               color: "#838383", grupo: "cerrada", terminada: true },
 };
-const GRUPOS = [
-  ["proyecto", "En proyecto", true],
-  ["obra", "En obra", true],
-  ["recepcion", "Recepción pendiente", true],
-  ["cerrada", "Terminadas", false],
+// Árbol de capas, igual que en QGIS / QField.
+const CAPAS = [
+  { id: "obra_e", grupo: "ESTRUCTURAS", nombre: "Estructuras OICI Obra", tipo: "estructura",
+    cats: ["proyecto", "aprobado_e", "hormigonado", "montaje", "infra"], on: true },
+  { id: "recep", grupo: "ESTRUCTURAS", nombre: "Estructuras OICI Recepciones", tipo: "estructura",
+    cats: ["r6", "r3", "vencida"], on: true },
+  { id: "term_e", grupo: "ESTRUCTURAS", nombre: "Estructuras OICI (terminadas)", tipo: "estructura",
+    cats: ["plazo", "sinfecha", "recibida"], on: false },
+  { id: "obras", grupo: "ESTRUCTURAS", nombre: "Obras", tipo: "obra",
+    cats: ["proyecto", "aprobado_o", "infra", "terminada"], on: true, apagadas: ["terminada"] },
 ];
+const capaDe = (tipo, cat) => CAPAS.find((c) => c.tipo === tipo && c.cats.includes(cat));
 
 // Formas de QGIS: MÁSTIL triángulo, MONOPOLO círculo, Obras cuadrado, COSITIO asterisco.
 function forma(tipo, o) {
@@ -97,35 +103,50 @@ function aviso(texto, mal = false) {
 const S = {
   api: null, usuario: null, perfil: null,
   datos: { estructura: [], obra: [] },
-  capas: { estructura: true, obra: true },
-  grupos: Object.fromEntries(GRUPOS.map(([k, , on]) => [k, on])),
-  mias: false, texto: "", abierta: null,
-  mapa: null, marcadores: new Map(), primeraVez: true,
+  capaOn: Object.fromEntries(CAPAS.map((c) => [c.id, c.on])),
+  catOn: Object.fromEntries(CAPAS.flatMap((c) => c.cats.map((k) => [`${c.id}:${k}`, !(c.apagadas || []).includes(k)]))),
+  abiertoArbol: Object.fromEntries(CAPAS.map((c) => [c.id, c.on])),
+  f: { mias: false, texto: "", director: "", licitacion: "", estructura: "", anio: "" },
+  abierta: null, tab: "capas",
+  mapa: null, base: {}, marcadores: new Map(), primeraVez: true,
 };
 const editor = () => S.perfil?.rol === "EDITOR";
+const partesDO = (v) => String(v || "").split(/[\/,;]+|\s+y\s+/).map((p) => p.trim()).filter(Boolean);
 
 function esMia(o) {
   const ini = normal(S.perfil?.iniciales_do);
-  if (!ini) return false;
-  return String(o.director_obra || "").split(/[\/,;y\-]+/).some((p) => normal(p) === ini);
+  return !!ini && partesDO(o.director_obra).some((p) => normal(p) === ini);
+}
+
+function pasaFiltros(tipo, o) {
+  const f = S.f, t = normal(f.texto);
+  if (f.mias && !esMia(o)) return false;
+  if (f.director && !partesDO(o.director_obra).some((p) => normal(p) === normal(f.director))) return false;
+  if (f.licitacion && o.licitacion !== f.licitacion) return false;
+  if (f.anio && String(o.anio ?? "") !== f.anio) return false;
+  if (f.estructura) {
+    if (tipo !== "estructura") return false;
+    if (forma(tipo, o) !== f.estructura) return false;
+  }
+  if (t && ![o.codigo, o.localidad, o.licitacion, o.estructura, o.sala, o.tarea].some((v) => normal(v).includes(t))) return false;
+  return true;
+}
+const filtrosActivos = () => ["mias", "texto", "director", "licitacion", "estructura", "anio"].filter((k) => S.f[k]).length;
+
+function todas() {
+  const out = [];
+  for (const tipo of ["estructura", "obra"]) for (const o of S.datos[tipo]) {
+    const cat = categoria(tipo, o);
+    out.push({ tipo, o, cat, capa: capaDe(tipo, cat) });
+  }
+  return out;
 }
 
 function visibles() {
-  const t = normal(S.texto);
-  const out = [];
-  for (const tipo of ["estructura", "obra"]) {
-    if (!S.capas[tipo]) continue;
-    for (const o of S.datos[tipo]) {
-      const cat = categoria(tipo, o);
-      if (!S.grupos[CAT[cat].grupo]) continue;
-      if (S.mias && !esMia(o)) continue;
-      if (t && ![o.codigo, o.localidad, o.licitacion, o.estructura, o.sala].some((v) => normal(v).includes(t))) continue;
-      out.push({ tipo, o, cat });
-    }
-  }
   const orden = ["obra", "recepcion", "proyecto", "cerrada"];
-  return out.sort((a, b) => orden.indexOf(CAT[a.cat].grupo) - orden.indexOf(CAT[b.cat].grupo)
-    || String(a.o.codigo).localeCompare(String(b.o.codigo)));
+  return todas().filter((x) => x.capa && S.capaOn[x.capa.id] && S.catOn[`${x.capa.id}:${x.cat}`] && pasaFiltros(x.tipo, x.o))
+    .sort((a, b) => orden.indexOf(CAT[a.cat].grupo) - orden.indexOf(CAT[b.cat].grupo)
+      || String(a.o.codigo).localeCompare(String(b.o.codigo)));
 }
 
 // ------------------------------------------------------------ vistas
@@ -204,9 +225,10 @@ async function entrarApp() {
   }
   mostrar("vista-app");
   $("#nombre-usuario").textContent = S.perfil.nombre + (editor() ? "" : " · solo lectura");
-  $("#mis-obras").parentElement.hidden = !S.perfil.iniciales_do;
+  $("#boton-usuarios").hidden = !S.perfil.admin;
+  $("#boton-usuarios").onclick = abrirAdmin;
+  $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
   prepararMapa();
-  prepararFiltros();
   await cargar();
 }
 
@@ -221,28 +243,121 @@ async function cargar() {
   pintar();
 }
 
-// ------------------------------------------------------------ filtros y lista
-function prepararFiltros() {
-  const capa = $("#chips-capa"), sit = $("#chips-situacion");
-  capa.innerHTML = [["estructura", "Estructuras"], ["obra", "Obras"]].map(([k, n]) =>
-    `<label class="chip"><input type="checkbox" data-capa="${k}" ${S.capas[k] ? "checked" : ""}>${n} <span class="n" data-n="${k}"></span></label>`).join("");
-  sit.innerHTML = GRUPOS.map(([k, n]) =>
-    `<label class="chip"><input type="checkbox" data-grupo="${k}" ${S.grupos[k] ? "checked" : ""}>${n}</label>`).join("");
-  capa.onchange = (ev) => { S.capas[ev.target.dataset.capa] = ev.target.checked; pintar(); };
-  sit.onchange = (ev) => { S.grupos[ev.target.dataset.grupo] = ev.target.checked; pintar(); };
-  $("#buscar").oninput = (ev) => { S.texto = ev.target.value; pintar(); };
-  $("#mis-obras").onchange = (ev) => { S.mias = ev.target.checked; S.primeraVez = true; pintar(); };
-  $("#tab-lista").onclick = () => verTab("lista");
-  $("#tab-venc").onclick = () => verTab("venc");
+// ------------------------------------------------------------ pestañas
+function verTab(t) {
+  S.tab = t;
+  document.querySelectorAll("#pestanas [data-tab]").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === t));
+  document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = d.dataset.panel !== t));
+  pintarPanel();
 }
 
-function verTab(t) {
-  $("#tab-lista").setAttribute("aria-selected", t === "lista");
-  $("#tab-venc").setAttribute("aria-selected", t === "venc");
-  $("#lista").hidden = t !== "lista";
-  $("#filtros").hidden = t !== "lista";
-  $("#vencimientos").hidden = t !== "venc";
-  if (t === "venc") pintarVencimientos();
+// ------------------------------------------------------------ capas (como el panel de QField)
+function pintarCapas() {
+  const t = todas().filter((x) => pasaFiltros(x.tipo, x.o));
+  const n = (capa, cat) => t.filter((x) => x.capa === capa && (!cat || x.cat === cat)).length;
+  const ejemplo = (capa) => (capa.tipo === "obra" ? { descripcion: "OBRA" } : { estructura: "MONOPOLO" });
+  const grupos = [...new Set(CAPAS.map((c) => c.grupo))];
+  const html = grupos.map((g) => {
+    const capas = CAPAS.filter((c) => c.grupo === g);
+    const alguna = capas.some((c) => S.capaOn[c.id]), todasOn = capas.every((c) => S.capaOn[c.id]);
+    return `<div class="arbol-grupo">
+      <label class="nodo nodo-grupo"><input type="checkbox" data-grupo="${g}" ${alguna ? "checked" : ""} data-medio="${alguna && !todasOn}"> ${esc(g)}</label>
+      ${capas.map((c) => `<div class="arbol-capa${S.capaOn[c.id] ? "" : " apagada"}">
+        <div class="nodo nodo-capa">
+          <button class="plegar" data-plegar="${c.id}" aria-expanded="${!!S.abiertoArbol[c.id]}" aria-label="Mostrar categorías de ${esc(c.nombre)}">${S.abiertoArbol[c.id] ? "▾" : "▸"}</button>
+          <label><input type="checkbox" data-capa="${c.id}" ${S.capaOn[c.id] ? "checked" : ""}> ${esc(c.nombre)}</label>
+          <span class="n">${n(c)}</span>
+        </div>
+        ${S.abiertoArbol[c.id] ? `<ul class="cats">${c.cats.map((k) => `<li><label class="nodo">
+          <input type="checkbox" data-cat="${c.id}:${k}" ${S.catOn[`${c.id}:${k}`] ? "checked" : ""}>
+          <span class="sim">${simbolo(c.tipo, ejemplo(c), k, 0.85)}</span><span>${esc(CAT[k].nombre)}</span>
+          <span class="n">${n(c, k)}</span></label></li>`).join("")}</ul>` : ""}
+      </div>`).join("")}
+    </div>`;
+  }).join("");
+  const formas = [["estructura", { estructura: "MÁSTIL" }, "Mástil"], ["estructura", { estructura: "MONOPOLO" }, "Monopolo"],
+    ["obra", { descripcion: "OBRA" }, "Obra"], ["obra", { descripcion: "COSITIO" }, "Cositio"]]
+    .map(([tp, o, nm]) => `<span>${svgForma(forma(tp, o), "#ffffff", "#52626D", forma(tp, o) === "asterisco" ? 15 : 12)}${nm}</span>`).join("");
+  const p = $("#panel-capas");
+  p.innerHTML = `${html}
+    <div class="arbol-grupo"><p class="nodo nodo-grupo">Formas</p><div class="formas">${formas}</div></div>
+    <div class="arbol-grupo"><p class="nodo nodo-grupo">Mapa base</p>
+      <div class="bases">${Object.keys(S.base).map((b) => `<label class="nodo"><input type="radio" name="base" value="${b}" ${S.mapa.hasLayer(S.base[b]) ? "checked" : ""}> ${b}</label>`).join("")}</div></div>
+    ${filtrosActivos() ? `<p class="nota aviso-filtro">Hay ${filtrosActivos()} filtro${filtrosActivos() > 1 ? "s" : ""} activo${filtrosActivos() > 1 ? "s" : ""}: las cantidades ya los tienen en cuenta.</p>` : ""}`;
+  p.querySelectorAll('[data-medio="true"]').forEach((el) => (el.indeterminate = true));
+  p.onchange = (ev) => {
+    const el = ev.target;
+    if (el.dataset.grupo) CAPAS.filter((c) => c.grupo === el.dataset.grupo).forEach((c) => (S.capaOn[c.id] = el.checked));
+    if (el.dataset.capa) S.capaOn[el.dataset.capa] = el.checked;
+    if (el.dataset.cat) S.catOn[el.dataset.cat] = el.checked;
+    if (el.name === "base") for (const [k, l] of Object.entries(S.base)) k === el.value ? l.addTo(S.mapa) : l.remove();
+    pintar();
+  };
+  p.onclick = (ev) => {
+    const b = ev.target.closest("[data-plegar]");
+    if (b) { S.abiertoArbol[b.dataset.plegar] = !S.abiertoArbol[b.dataset.plegar]; pintarCapas(); }
+  };
+}
+
+// ------------------------------------------------------------ filtros
+function pintarFiltros() {
+  const vals = (fn) => [...new Set(todas().flatMap((x) => fn(x)).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "es", { numeric: true }));
+  const opciones = (lista, actual, todos) => `<option value="">${todos}</option>` +
+    lista.map((v) => `<option ${String(v) === actual ? "selected" : ""}>${esc(v)}</option>`).join("");
+  const directores = vals((x) => partesDO(x.o.director_obra));
+  const p = $("#panel-filtros");
+  p.innerHTML = `<form class="form filtros" id="form-filtros">
+    ${S.perfil.iniciales_do ? `<label class="interruptor-fila"><input type="checkbox" name="mias" ${S.f.mias ? "checked" : ""}>
+      <span><b>Mis obras</b><br><small>Solo donde el director de obra es ${esc(S.perfil.iniciales_do)}</small></span></label>` : ""}
+    <label>Buscar<input type="search" name="texto" value="${esc(S.f.texto)}" placeholder="Código, localidad, licitación o tarea"></label>
+    <label>Director de obra<select name="director">${opciones(directores, S.f.director, "Todos")}</select></label>
+    <label>Licitación<select name="licitacion">${opciones(vals((x) => [x.o.licitacion]), S.f.licitacion, "Todas")}</select></label>
+    <label>Tipo de estructura<select name="estructura">
+      <option value="">Todos</option>
+      <option value="triangulo" ${S.f.estructura === "triangulo" ? "selected" : ""}>Mástil</option>
+      <option value="circulo" ${S.f.estructura === "circulo" ? "selected" : ""}>Monopolo</option></select></label>
+    <label>Año<select name="anio">${opciones(vals((x) => [x.o.anio]), S.f.anio, "Todos")}</select></label>
+    <button class="boton" type="button" id="limpiar-filtros" ${filtrosActivos() ? "" : "disabled"}>Quitar filtros</button>
+    <p class="nota">Los filtros se aplican a todas las capas del mapa y a la lista.</p>
+  </form>`;
+  const form = $("#form-filtros");
+  const leer = () => {
+    S.f = { mias: !!form.mias?.checked, texto: form.texto.value, director: form.director.value,
+      licitacion: form.licitacion.value, estructura: form.estructura.value, anio: form.anio.value };
+    S.primeraVez = true;
+    pintar(false);
+    $("#limpiar-filtros").disabled = !filtrosActivos();
+  };
+  form.onchange = leer;
+  form.texto.oninput = leer;
+  $("#limpiar-filtros").onclick = () => {
+    S.f = { mias: false, texto: "", director: "", licitacion: "", estructura: "", anio: "" };
+    pintar();
+  };
+}
+
+function pintarLista(v) {
+  $("#resumen-lista").textContent = `${v.length} ${v.length === 1 ? "obra visible" : "obras visibles"}` +
+    (filtrosActivos() ? `, con ${filtrosActivos()} filtro${filtrosActivos() > 1 ? "s" : ""}` : "");
+  const lista = $("#lista");
+  lista.innerHTML = v.length ? v.map((x) => filaHtml(x)).join("")
+    : `<li class="vacio">Ninguna obra coincide. Revisá las capas prendidas y los filtros.</li>`;
+  enlazarFilas(lista);
+}
+
+function pintarPanel(rehacerFiltros = true) {
+  const v = visibles();
+  $("#cuenta-lista").textContent = v.length;
+  $("#cuenta-filtros").textContent = filtrosActivos() || "";
+  if (S.tab === "capas") pintarCapas();
+  if (S.tab === "filtros" && rehacerFiltros) pintarFiltros();
+  if (S.tab === "lista") pintarLista(v);
+  if (S.tab === "venc") pintarVencimientos();
+  return v;
+}
+
+function pintar(rehacerFiltros = true) {
+  pintarMapa(pintarPanel(rehacerFiltros));
 }
 
 function filaHtml({ tipo, o, cat }, eti = "") {
@@ -266,34 +381,17 @@ function enlazarFilas(cont) {
   });
 }
 
-function pintar() {
-  const v = visibles();
-  for (const tipo of ["estructura", "obra"]) {
-    const n = v.filter((x) => x.tipo === tipo).length;
-    const span = document.querySelector(`[data-n="${tipo}"]`);
-    if (span) span.textContent = S.capas[tipo] ? n : "";
-  }
-  const lista = $("#lista");
-  lista.innerHTML = v.length ? v.map((x) => filaHtml(x)).join("")
-    : `<li class="vacio">${S.mias ? "No hay obras con tus iniciales con estos filtros." : "Ninguna obra coincide con los filtros."}</li>`;
-  enlazarFilas(lista);
-  pintarMapa(v);
-  if (!$("#vencimientos").hidden) pintarVencimientos();
-}
-
 function pintarVencimientos() {
   const base = [];
-  for (const tipo of ["estructura", "obra"]) for (const o of S.datos[tipo]) {
-    if (S.mias && !esMia(o)) continue;
-    base.push({ tipo, o, cat: categoria(tipo, o) });
-  }
+  for (const x of todas()) if (pasaFiltros(x.tipo, x.o)) base.push(x);
   const rec = base.filter((x) => x.tipo === "estructura" && CAT[x.cat].recepcion && x.o.dias_para_recepcion != null)
     .sort((a, b) => a.o.dias_para_recepcion - b.o.dias_para_recepcion);
   const hit = base.filter((x) => x.o.proximo_vencimiento).sort((a, b) => a.o.proximo_vencimiento.localeCompare(b.o.proximo_vencimiento));
   const dias = (d) => (d < 0 ? `vencida hace ${-d} d` : d === 0 ? "vence hoy" : `faltan ${d} d`);
   const cont = $("#vencimientos");
   cont.className = "venc";
-  cont.innerHTML = `
+  const aviso = filtrosActivos() ? `<p class="resumen">Con ${filtrosActivos()} filtro${filtrosActivos() > 1 ? "s" : ""} activo${filtrosActivos() > 1 ? "s" : ""}.</p>` : "";
+  cont.innerHTML = `${aviso}
     <h3>Recepciones vencidas y de los próximos 6 meses</h3>
     <ol class="lista">${rec.length ? rec.map((x) => filaHtml(x, `<span class="${x.o.dias_para_recepcion < 0 ? "mal" : ""}">${dias(x.o.dias_para_recepcion)}</span>`)).join("")
       : `<li class="vacio">No hay recepciones vencidas ni que venzan en los próximos 6 meses.</li>`}</ol>
@@ -310,23 +408,13 @@ function pintarVencimientos() {
 function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: true, attributionControl: true }).setView([-32.6, -56.0], 7);
-  const calles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  S.base["Calles"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(S.mapa);
-  const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  S.base["Satélite"] = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 19, attribution: "Imágenes © Esri" });
-  L.control.layers({ "Calles": calles, "Satélite": sat }, null, { position: "topright" }).addTo(S.mapa);
   const lejos = () => $("#mapa").classList.toggle("lejos", S.mapa.getZoom() < 8);
   S.mapa.on("zoomend", lejos); lejos();
-  const ej = (e, d = "") => ({ estructura: e, descripcion: d });
-  $("#leyenda").innerHTML = `<b>En proyecto y en obra</b>` +
-    ["proyecto", "aprobado_e", "hormigonado", "montaje", "infra"].map((k) => leyendaFila("estructura", ej("MONOPOLO"), k)).join("") +
-    `<b>Recepción a 2 años</b>` + ["r6", "r3", "vencida"].map((k) => leyendaFila("estructura", ej("MONOPOLO"), k)).join("") +
-    leyendaFila("estructura", ej("MONOPOLO"), "recibida", "Terminada o recibida") +
-    `<b>Formas</b><div class="formas">` +
-    [["estructura", ej("MÁSTIL"), "Mástil"], ["estructura", ej("MONOPOLO"), "Monopolo"], ["obra", ej("", "OBRA"), "Obra"], ["obra", ej("", "COSITIO"), "Cositio"]]
-      .map(([t, o, n]) => `<span>${svgForma(forma(t, o), "#ffffff", "#52626D", forma(t, o) === "asterisco" ? 15 : 12)}${n}</span>`).join("") + `</div>`;
 }
-const leyendaFila = (t, o, k, n) => `<div>${simbolo(t, o, k, 0.85)}${n || CAT[k].nombre}</div>`;
 
 function icono(tipo, o, cat) {
   const c = CAT[cat];
@@ -496,6 +584,69 @@ function enlazarHito(row, tipo, obraId) {
     ? guardar({ estado: "HECHO", fecha_real: hoy() }, "Hito marcado como hecho")
     : guardar({ estado: "PENDIENTE", fecha_real: null }, "Hito vuelto a pendiente");
   if (fec) fec.onchange = () => fec.value && guardar({ fecha_real: fec.value }, "Fecha del hito guardada");
+}
+
+// ------------------------------------------------------------ usuarios (solo administradores)
+async function abrirAdmin() {
+  const caja = $("#admin");
+  caja.hidden = false;
+  caja.innerHTML = `<div class="ficha-cabeza"><button class="volver">Volver al mapa</button><h2 class="admin-titulo">Usuarios</h2></div><p class="nota" style="padding:0 16px">Cargando…</p>`;
+  $(".volver", caja).onclick = () => { caja.hidden = true; };
+  let cuentas;
+  try { cuentas = await S.api.adminUsuarios(); }
+  catch (e) {
+    caja.querySelector(".nota").textContent = /admin_usuarios|function|schema cache/i.test(e.message)
+      ? "Falta preparar la base para administrar usuarios: corré sql/parte3_admin_usuarios.sql en Neon y tocá Refresh schema cache en la Data API."
+      : e.message;
+    return;
+  }
+  const dirs = [...new Set(todas().flatMap((x) => partesDO(x.o.director_obra)))].sort();
+  const pend = cuentas.filter((c) => !c.habilitado), con = cuentas.filter((c) => c.habilitado);
+  const rolSel = (r) => `<select name="rol"><option value="EDITOR" ${r === "EDITOR" ? "selected" : ""}>Editor</option><option value="LECTOR" ${r === "LECTOR" ? "selected" : ""}>Solo lectura</option></select>`;
+  const reg = (c) => (c.registrado ? "se registró el " + fecha(String(c.registrado).slice(0, 10)) : "");
+  caja.innerHTML = `<div class="ficha-cabeza"><button class="volver">Volver al mapa</button><h2 class="admin-titulo">Usuarios</h2>
+      <p class="nota">Quien se registra en la web aparece acá. Habilitalo para que vea las obras.</p></div>
+    <datalist id="lista-do">${dirs.map((d) => `<option value="${esc(d)}">`).join("")}</datalist>
+    <div class="ficha-bloque">
+      <h2>Esperando habilitación <span class="cuenta">${pend.length || ""}</span></h2>
+      ${pend.length ? pend.map((c) => `<form class="form cuenta-form" data-id="${esc(c.user_id)}">
+          <p class="cuenta-mail"><b>${esc(c.email)}</b><br><small>${esc(c.nombre_cuenta || "")} ${reg(c)}</small></p>
+          <label>Nombre<input name="nombre" value="${esc(c.nombre_cuenta || "")}" required></label>
+          <div class="dos"><label>Permiso${rolSel("EDITOR")}</label>
+          <label>Iniciales D.O.<input name="ini" list="lista-do" placeholder="G.S."></label></div>
+          <button class="boton boton-primario" type="submit">Habilitar</button>
+        </form>`).join("") : `<p class="nota">No hay cuentas nuevas. Cuando alguien use "Crear cuenta" en la web, va a aparecer acá.</p>`}
+    </div>
+    <div class="ficha-bloque">
+      <h2>Con acceso <span class="cuenta">${con.length}</span></h2>
+      ${con.map((c) => `<form class="form cuenta-form" data-id="${esc(c.user_id)}">
+          <p class="cuenta-mail"><b>${esc(c.nombre)}</b>${c.admin ? ' <span class="etiqueta">administrador</span>' : ""}<br><small>${esc(c.email)}</small></p>
+          <input type="hidden" name="nombre" value="${esc(c.nombre)}">
+          <div class="dos"><label>Permiso${rolSel(c.rol)}</label>
+          <label>Iniciales D.O.<input name="ini" list="lista-do" value="${esc(c.iniciales_do || "")}"></label></div>
+          <div class="acciones"><button class="boton" type="submit">Guardar cambios</button>
+          ${c.user_id === S.perfil.user_id ? "" : `<button class="boton boton-peligro" type="button" data-quitar>Quitar acceso</button>`}</div>
+        </form>`).join("")}
+    </div>`;
+  $(".volver", caja).onclick = () => { caja.hidden = true; };
+  caja.querySelectorAll(".cuenta-form").forEach((f) => {
+    f.onsubmit = async (ev) => {
+      ev.preventDefault();
+      f.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      try {
+        await S.api.adminHabilitar(f.dataset.id, f.nombre.value.trim(), f.rol.value, f.ini.value.trim());
+        aviso(f.closest(".ficha-bloque").querySelector("h2").textContent.startsWith("Esperando") ? `${f.nombre.value} habilitado` : "Cambios guardados");
+        if (f.dataset.id === S.perfil.user_id) S.perfil = await S.api.perfil();
+        abrirAdmin();
+      } catch (e) { aviso(e.message, true); f.querySelectorAll("button").forEach((b) => (b.disabled = false)); }
+    };
+    const q = f.querySelector("[data-quitar]");
+    if (q) q.onclick = async () => {
+      if (!confirm(`¿Quitarle el acceso a ${f.nombre.value}? Su cuenta sigue existiendo y la podés volver a habilitar.`)) return;
+      try { await S.api.adminQuitar(f.dataset.id); aviso("Acceso quitado"); abrirAdmin(); }
+      catch (e) { aviso(e.message, true); }
+    };
+  });
 }
 
 iniciar();
