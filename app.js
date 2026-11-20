@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-17";
+import { crearApi } from "./api.js?v=2026-11-20-18";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1189,7 +1189,11 @@ function pintarFicha(tipo, o, hitos, notas) {
   const tramos = pasos.map((p, i) => {
     const col = CAT[p]?.color || c.color;
     // ej.: infraestructura terminada antes del montaje: el tramo verde queda lleno aunque la obra esté en montaje
-    const cls = i < pos ? "tramo hecho" : i === pos ? "tramo actual" : hechas.has(HITO_TRAMO[p]) ? "tramo hecho" : "tramo";
+    // los tramos de obra (hormigonado, montaje, infraestructura) siguen a su hito, no al orden
+    const deObra = hitos && [3, 4, 5].includes(HITO_TRAMO[p]);
+    const cls = i === pos ? "tramo actual"
+      : deObra ? (hechas.has(HITO_TRAMO[p]) ? "tramo hecho" : "tramo")
+      : i < pos || hechas.has(HITO_TRAMO[p]) ? "tramo hecho" : "tramo";
     return `<span class="${cls}" style="--c:${i === pos ? c.color : col}" title="${esc(CAT[p]?.nombre || NOMBRE_TRAMO[p])}"></span>`;
   }).join("");
   const detalle = tipo === "estructura" && (c.recepcion || cat === "plazo") && o.dias_para_recepcion != null
@@ -1247,7 +1251,7 @@ function pintarFicha(tipo, o, hitos, notas) {
       <div id="datos-cuerpo"><dl class="datos">${datos.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v ?? "—") || "—"}</dd>`).join("")}</dl></div>
       ${editor() ? `<label class="form" style="margin-top:10px">Situación
         <select id="cambiar-estado">${opciones}</select></label>
-        <p class="nota" style="margin-top:6px">${tipo === "estructura" ? 'Pasa sola a "En obra" al marcar el hito Implantación, y a "Terminada" con infraestructura, hormigonado y montaje hechos.' : 'Pasá a "En obra" cuando arranca. El fin se marca con su hito.'}</p>` : ""}
+        <p class="nota" style="margin-top:6px">${tipo === "estructura" ? 'Pasa sola a "En obra" al marcar Implantado, y a "Terminada" con Hormigonado, Montado e Infraestructura finalizada.' : 'Pasá a "En obra" cuando arranca. El fin se marca con su hito.'}</p>` : ""}
     </div>
     ${bloqueBorrar(tipo, o)}`;
 

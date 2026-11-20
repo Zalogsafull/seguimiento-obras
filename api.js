@@ -135,9 +135,9 @@ function crearDemo() {
       licitacion: "L-19", tarea: "Energía", descripcion: "OBRA", director_obra: "J.P.", planos: null,
       lat: -34.48, lon: -54.33, hitos_hechos: 1, hitos_total: 2, proximo_vencimiento: null },
   ];
-  const plant = { estructura: ["Proyecto ejecutivo realizado y aprobado", "Implantación (inicio de obra)", "Hormigonado", "Estructura montada",
-    "Infraestructura terminada (fin de obra)", "Recepción provisoria", "Recepción definitiva"],
-    obra: ["Proyecto aprobado", "Infraestructura terminada (fin de obra)"] };
+  const plant = { estructura: ["Proyecto ejecutivo realizado y aprobado", "Implantado", "Hormigonado", "Montado",
+    "Infraestructura finalizada", "Recepción provisoria", "Recepción definitiva"],
+    obra: ["Proyecto aprobado", "Infraestructura finalizada"] };
   const etapaDe = { estructura: [2, null, 3, 4, 5, null, 6], obra: [2, 5] };
   const relev = [
     { id: 1, codigo: "P1", descripcion: "Poste de UTE frente al predio", z: "38.42", lat: -34.8812, lon: -56.1765 },
@@ -150,7 +150,7 @@ function crearDemo() {
     for (const o of lista) {
       plant[tipo].forEach((nombre, i) => {
         const et = etapaDe[tipo][i];
-        const hecho = /^Implantaci/.test(nombre) ? o.estado !== "PROY"
+        const hecho = /^Implanta/.test(nombre) ? o.estado !== "PROY"
           : et != null && et <= o.etapa && !(et === 2 && o.etapa === 1);
         hitos.push({ id: hid++, [tipo === "estructura" ? "estructura_id" : "obra_id"]: o.id, orden: (i + 1) * 10, nombre,
           etapa: et, estado: hecho ? "HECHO" : "PENDIENTE", fecha_real: hecho ? dia(-30 * (6 - i)) : null,
@@ -169,7 +169,7 @@ function crearDemo() {
       // mismas reglas que la base (sql/parte8 y parte10)
       const est = (e) => hs.find((h) => h.etapa === e)?.estado;
       const ok = (e) => ["HECHO", "NO APLICA"].includes(est(e));
-      const impl = hs.find((h) => /^Implantaci/.test(h.nombre))?.estado === "HECHO";
+      const impl = hs.find((h) => /^Implanta/.test(h.nombre))?.estado === "HECHO";
       const base = Math.max(1, ...hs.filter((h) => h.estado === "HECHO" && h.etapa >= 2 && h.etapa <= 4).map((h) => h.etapa));
       const cerrada = est(5) === "HECHO" && ok(3) && ok(4);
       o.etapa = cerrada ? (est(6) === "HECHO" ? 6 : 5) : est(5) === "EN CURSO" ? Math.max(base, 4) : base;
