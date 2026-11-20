@@ -216,7 +216,8 @@ function crearDemo() {
       const id = Math.max(0, ...lista.map((x) => x.id)) + 1;
       if (capa === "estructura") {
         est.push(E(id, d["CÓDIGO"], d["ESTADO"] || "PROY", 1, lat, lon, { estructura: d["ESTRUCTURA"], licitacion: d["LICITACIÓN"],
-          anio: d["AÑO"], director_obra: d["D.O."], fecha_inicio: d["FECHA INICIO"] || null, planos: d["PLANOS"] || null, hitos_total: 6 }));
+          anio: d["AÑO"], director_obra: d["D.O."], fecha_inicio: d["FECHA INICIO"] || null, planos: d["PLANOS"] || null, hitos_total: 6,
+          fecha_fin: d["FECHA FIN"] || null, recepcion: d["RECEPCIÓN"] || null, fin_previsto: d["FIN PREVISTO"] || null, observaciones: d["OBSERVACIONES"] || null }));
       } else {
         obr.push({ id, codigo: d["CÓDIGO"], estado: d["Estado"] || "PROY", etapa: 1, sala: d["Sala"], localidad: d["Localidad"],
           departamento: d["Departamento"], licitacion: d["Licitación"], tarea: d["Tarea"], descripcion: d["Descripción"],

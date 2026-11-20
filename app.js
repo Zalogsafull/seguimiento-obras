@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-30";
+import { crearApi } from "./api.js?v=2026-11-20-31";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -439,6 +439,7 @@ function mostrarApp() {
   if (S.appLista) return;
   S.appLista = true;
   $("#boton-nuevo").onclick = abrirNuevo;
+  document.addEventListener("paste", alPegar);
   $("#recargar").onclick = () => {
     $("#recargar").classList.add("girando");
     if (navigator.onLine) { try { localStorage.removeItem(CLAVE_DATOS); } catch (e) { /* nada */ } }
@@ -2285,6 +2286,7 @@ function clickMapaNuevo(ev) {
 
 function cerrarNuevo() {
   $("#nuevo").hidden = true;
+  if (PG.marcas) { PG.marcas.remove(); PG.marcas = null; }
   quitarMarca();
   S.mapa.off("click", clickMapaNuevo);
   $("#mapa").classList.remove("modo-nuevo");
@@ -2350,7 +2352,8 @@ function pintarNuevo() {
 
   caja.innerHTML = `
     <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Punto nuevo</h2>
-      <p class="nota" style="margin:0">Buscá las coordenadas o tocá el mapa. Después podés arrastrar la marca para corregir la ubicación.</p></div>
+      <p class="nota" style="margin:0">Buscá las coordenadas o tocá el mapa. Después podés arrastrar la marca para corregir la ubicación.</p>
+      <button class="boton boton-chico boton-pegar" type="button" id="abrir-pegar">Pegar varios desde QGIS</button></div>
     <form class="form" id="form-nuevo" novalidate>
       <div class="ficha-bloque">
         <h2>Capa</h2>
@@ -2396,6 +2399,11 @@ function pintarNuevo() {
   enlazarCerrar(caja, cerrarNuevo);
   const f = $("#form-nuevo");
   $("#cancelar-nuevo").onclick = cerrarNuevo;
+  $("#abrir-pegar").onclick = async () => {
+    let lote = null;
+    try { lote = leerPegado(await navigator.clipboard.readText()); } catch (e) { /* sin permiso: se pega a mano */ }
+    abrirPegar(lote);
+  };
   f.querySelectorAll("input[name=capa]").forEach((r) => (r.onchange = () => {
     NV.capa = r.value;
     const lat = NV.lat, lon = NV.lon;
@@ -2502,6 +2510,357 @@ async function guardarNuevo(ev) {
       : e.message);
     b.disabled = false; b.textContent = "Agregar punto";
   }
+}
+
+// ------------------------------------------------------------ pegar elementos copiados en QGIS (Ctrl+C en QGIS, Ctrl+V acá)
+// QGIS copia las entidades seleccionadas como texto: una fila de títulos y una fila por entidad,
+// separadas por tabulaciones, con la geometría en WKT (columna wkt_geom). También puede copiar GeoJSON.
+// Las coordenadas vienen en el sistema de la capa de QGIS (en este proyecto, UTM 21 S) o en grados.
+const PG = { lote: null, capa: "estructura", sistema: "auto", saltearRepetidos: true, marcas: null, corriendo: false, cancelar: false };
+const clave = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+// columnas que no se copian: las pone o las calcula la base
+const NO_SE_COPIAN = new Set(["WKTGEOM", "FID", "ID", "GEOM", "ETAPA", "LAT", "LONG", "LON", "MAPS", "WAZE"].map(clave));
+const SISTEMAS = {
+  utm21: "UTM 21 S (EPSG 31981 / 32721, el de la capa en QGIS)",
+  utm22: "UTM 22 S (EPSG 31982 / 32722)",
+  grados: "Grados, WGS 84 (EPSG 4326)",
+};
+
+// UTM (hemisferio sur) a latitud y longitud; elipsoide GRS 80 (SIRGAS 2000, igual a WGS 84 para esto)
+function utmAGrados(x, y, zona) {
+  const a = 6378137, f = 1 / 298.257222101, k0 = 0.9996, e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+  const X = x - 500000, M = (y - 10000000) / k0;
+  const mu = M / (a * (1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256));
+  const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+  const p1 = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu) + (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
+    + (151 * e1 ** 3 / 96) * Math.sin(6 * mu) + (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
+  const s = Math.sin(p1), c = Math.cos(p1), t = Math.tan(p1);
+  const N1 = a / Math.sqrt(1 - e2 * s * s), T1 = t * t, C1 = ep2 * c * c, R1 = a * (1 - e2) / (1 - e2 * s * s) ** 1.5, D = X / (N1 * k0);
+  const lat = p1 - (N1 * t / R1) * (D ** 2 / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1 ** 2 - 9 * ep2) * D ** 4 / 24
+    + (61 + 90 * T1 + 298 * C1 + 45 * T1 ** 2 - 252 * ep2 - 3 * C1 ** 2) * D ** 6 / 720);
+  const lon = (zona * 6 - 183) * Math.PI / 180 + (D - (1 + 2 * T1 + C1) * D ** 3 / 6
+    + (5 - 2 * C1 + 28 * T1 - 3 * C1 ** 2 + 8 * ep2 + 24 * T1 ** 2) * D ** 5 / 120) / c;
+  return { lat: lat * 180 / Math.PI, lon: lon * 180 / Math.PI };
+}
+
+// Geometría WKT -> { x, y, z } del punto, o { tipo } si no es un punto
+function leerWkt(w) {
+  const s = String(w || "").trim();
+  if (!s) return { tipo: "sin geometría" };
+  // QGIS escribe "PointZ", "MultiPointZ", "Point Z"…: se saca la Z o M del final
+  const tipo = (s.match(/^[A-Za-z]+/) || [""])[0].toUpperCase().replace(/(Z|M|ZM)$/, "").replace(/^(MULTI)?(POINT|POLYGON|LINESTRING|CURVE).*/, "$1$2");
+  if (tipo !== "POINT" && tipo !== "MULTIPOINT") {
+    const nombres = { POLYGON: "un polígono", MULTIPOLYGON: "un polígono", LINESTRING: "una línea", MULTILINESTRING: "una línea" };
+    return { tipo: nombres[tipo] || "otra geometría" };
+  }
+  const n = s.match(/-?\d+(?:\.\d+)?(?:e[-+]?\d+)?/gi);
+  if (!n || n.length < 2) return { tipo: "punto vacío" };
+  const tieneZ = /^\s*(multi)?point\s*z/i.test(s);
+  // en un multipunto se toma el primero
+  const primero = s.replace(/^[^(]*\(+/, "").split(/[,)]/)[0].trim().split(/\s+/).map(Number);
+  return { x: primero[0], y: primero[1], z: tieneZ && primero.length > 2 ? primero[2] : null, varios: tipo === "MULTIPOINT" && /,/.test(s) };
+}
+
+// Texto del portapapeles -> { titulos, filas: [{ datos, geo }] } o null si no parece copiado de QGIS
+function leerPegado(texto) {
+  const t = String(texto || "").replace(/^﻿/, "").trim();
+  if (!t) return null;
+  if (t[0] === "{") {
+    let j;
+    try { j = JSON.parse(t); } catch (e) { return null; }
+    const fs = j.type === "FeatureCollection" ? j.features : j.type === "Feature" ? [j] : null;
+    if (!fs || !fs.length) return null;
+    const titulos = [...new Set(fs.flatMap((f) => Object.keys(f.properties || {})))];
+    return {
+      origen: "GeoJSON", titulos,
+      filas: fs.map((f) => {
+        const g = f.geometry || {};
+        let geo;
+        if (g.type === "Point" && Array.isArray(g.coordinates)) geo = { x: g.coordinates[0], y: g.coordinates[1], z: g.coordinates[2] ?? null };
+        else if (g.type === "MultiPoint" && g.coordinates?.length) geo = { x: g.coordinates[0][0], y: g.coordinates[0][1], z: g.coordinates[0][2] ?? null, varios: g.coordinates.length > 1 };
+        else geo = { tipo: !g.type ? "sin geometría" : /polygon/i.test(g.type) ? "un polígono" : /line/i.test(g.type) ? "una línea" : "otra geometría" };
+        return { datos: f.properties || {}, geo };
+      }),
+    };
+  }
+  const lineas = t.split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lineas.length < 2 || !lineas[0].includes("\t")) {
+    // una sola columna de WKT (QGIS sin atributos) también sirve
+    if (lineas.length >= 2 && /^wkt_geom$/i.test(lineas[0].trim())) {
+      return { origen: "QGIS", titulos: [], filas: lineas.slice(1).map((l) => ({ datos: {}, geo: leerWkt(l) })) };
+    }
+    return null;
+  }
+  const titulos = lineas[0].split("\t").map((x) => x.trim());
+  const iGeo = titulos.findIndex((x) => /^wkt_geom$/i.test(x));
+  const filas = [];
+  for (const l of lineas.slice(1)) {
+    const celdas = l.split("\t");
+    // un valor con salto de línea parte la fila: se pega a la anterior
+    if (celdas.length < titulos.length && filas.length && celdas.length === 1) continue;
+    const datos = {};
+    titulos.forEach((tt, i) => { if (i !== iGeo) datos[tt] = celdas[i]; });
+    filas.push({ datos, geo: iGeo >= 0 ? leerWkt(celdas[iGeo]) : { tipo: "sin geometría" } });
+  }
+  if (!filas.length) return null;
+  return { origen: "QGIS", titulos: titulos.filter((_, i) => i !== iGeo), sinGeometria: iGeo < 0, filas };
+}
+
+// Qué sistema de coordenadas usan los puntos pegados
+function sistemaDe(lote) {
+  const pts = lote.filas.map((f) => f.geo).filter((g) => g.x != null);
+  if (!pts.length) return "utm21";
+  if (pts.every((g) => Math.abs(g.x) <= 180 && Math.abs(g.y) <= 90)) return "grados";
+  const enUy = (z) => pts.filter((g) => { const p = utmAGrados(g.x, g.y, z); return dentroDeUruguay(p.lat, p.lon); }).length;
+  return enUy(22) > enUy(21) ? "utm22" : "utm21";
+}
+function aGrados(g, sistema) {
+  if (g.x == null || !isFinite(g.x) || !isFinite(g.y)) return null;
+  if (sistema === "grados") return { lat: g.y, lon: g.x };
+  return utmAGrados(g.x, g.y, sistema === "utm22" ? 22 : 21);
+}
+
+// Columnas de la capa de destino que la web conoce, para emparejar títulos sin importar mayúsculas ni tildes
+function columnasDestino(capa) {
+  if (capa === "relevamiento") return ["CÓDIGO", "DESCRIPCIÓN", "Z"];
+  return ["CÓDIGO", capa === "estructura" ? "ESTADO" : "Estado", ...CAMPOS_EDITABLES[capa].map((c) => c[0])];
+}
+function emparejar(titulos, capa) {
+  const conocidas = new Map(columnasDestino(capa).map((c) => [clave(c), c]));
+  // en Obras "Descripción" es el tipo (OBRA / COSITIO); en Relevamiento es el texto del punto
+  return titulos.map((t) => {
+    const k = clave(t);
+    if (NO_SE_COPIAN.has(k)) return { titulo: t, col: null, motivo: "la calcula la base" };
+    return { titulo: t, col: conocidas.get(k) || t, conocida: conocidas.has(k) };
+  });
+}
+function valorPegado(v, col) {
+  if (v == null) return null;
+  let s = String(v).trim();
+  if (s === "" || /^null$/i.test(s)) return null;
+  if (col === "ESTADO" || col === "Estado" || col === "RECEPCIÓN") s = s.toUpperCase();
+  if (/^FECHA|FIN PREVISTO/i.test(col)) {
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/) || s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/);
+    if (m) s = m[1].length === 4 ? `${m[1]}-${m[2]}-${m[3]}` : `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  }
+  if (col === "Z") s = s.replace(",", ".");
+  return s;
+}
+
+// Lo que se va a pegar, con el motivo de cada uno que se saltea
+function prepararPegado() {
+  const { lote, capa, sistema } = PG;
+  const cols = emparejar(lote.titulos, capa);
+  const existentes = new Set(S.datos[capa === "relevamiento" ? "relev" : capa].map((o) => normal(o.codigo)).filter(Boolean));
+  const vistos = new Set();
+  return lote.filas.map((f) => {
+    const datos = {};
+    for (const c of cols) {
+      if (!c.col) continue;
+      const v = valorPegado(f.datos[c.titulo], c.col);
+      if (v != null && datos[c.col] == null) datos[c.col] = v;
+    }
+    if (capa === "relevamiento" && datos.Z == null && f.geo.z != null && f.geo.z !== 0) datos.Z = String(f.geo.z);
+    if (capa === "estructura" && datos.ESTADO && !["PROY", "CONS", "FIN"].includes(datos.ESTADO)) delete datos.ESTADO;
+    if (capa === "obra" && datos.Estado && !["PROY", "CONS", "FIN"].includes(datos.Estado)) delete datos.Estado;
+    const codigo = datos["CÓDIGO"] || "";
+    const p = aGrados(f.geo, sistema);
+    let salta = null;
+    if (!p) salta = f.geo.tipo === "sin geometría" ? "no tiene ubicación" : `es ${f.geo.tipo}; en la web solo hay capas de puntos`;
+    else if (!dentroDeUruguay(p.lat, p.lon)) salta = "queda fuera de Uruguay";
+    else if (!codigo && capa !== "relevamiento") salta = "no tiene código";
+    else if (codigo && vistos.has(normal(codigo)) && capa !== "relevamiento") salta = "código repetido en lo copiado";
+    else if (codigo && existentes.has(normal(codigo)) && PG.saltearRepetidos) salta = "ya existe en la capa";
+    if (codigo) vistos.add(normal(codigo));
+    return { datos, codigo, p, salta, varios: f.geo.varios };
+  });
+}
+
+function abrirPegar(lote) {
+  if (!editor()) return aviso("Solo un usuario con permiso de editor puede pegar elementos.", true);
+  if (MED.activo) terminarMedida();
+  if (!$("#nuevo").hidden) cerrarNuevo();
+  $("#ficha").hidden = true; $("#admin").hidden = true;
+  PG.lote = lote;
+  PG.corriendo = false;
+  if (lote) {
+    PG.sistema = sistemaDe(lote);
+    PG.capa = capaSugerida(lote.titulos);
+    PG.vistoUnaVez = false;
+  }
+  $("#nuevo").hidden = false; // antes de dibujar, para encuadrar el mapa sabiendo cuánto tapa el panel
+  pintarPegar();
+}
+
+// La capa de destino: la que se parece a las columnas copiadas
+function capaSugerida(titulos) {
+  const k = new Set(titulos.map(clave));
+  const puntaje = (capa) => columnasDestino(capa).filter((c) => k.has(clave(c))).length
+    + (capa === "estructura" && k.has("ESTRUCTURA") ? 3 : 0) + (capa === "obra" && (k.has("SALA") || k.has("LOCALIDAD")) ? 3 : 0)
+    + (capa === "relevamiento" && k.size <= 4 ? 1 : 0);
+  const orden = ["estructura", "obra", "relevamiento"].map((c) => [c, puntaje(c)]).sort((a, b) => b[1] - a[1]);
+  return orden[0][1] > 0 ? orden[0][0] : NV.capa;
+}
+
+function cerrarPegar() {
+  if (PG.corriendo) { PG.cancelar = true; return; }
+  if (PG.marcas) { PG.marcas.remove(); PG.marcas = null; }
+  PG.lote = null;
+  $("#nuevo").hidden = true;
+}
+
+const NOMBRE_DESTINO = { estructura: "Estructuras OICI Obra", obra: "Obras", relevamiento: "Relevamiento" };
+
+function pintarPegar() {
+  const caja = $("#nuevo");
+  const cabeza = `<div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Pegar elementos</h2>
+      <p class="nota" style="margin:0">Copiá en QGIS las entidades seleccionadas (Ctrl+C) y pegalas acá (Ctrl+V), como al pegar en una capa en edición.</p></div>`;
+  if (!PG.lote) {
+    caja.innerHTML = `${cabeza}
+      <div class="ficha-bloque">
+        <h2>Pegá lo copiado</h2>
+        <textarea id="pegar-texto" class="pegar-texto" rows="6" placeholder="Pegá acá (Ctrl+V o mantené apretado y Pegar)"></textarea>
+        <p class="error" id="pegar-error" hidden></p>
+        <p class="nota pista">En QGIS: seleccioná los puntos, Editar > Copiar objetos espaciales (Ctrl+C). Si lo pegado no trae coordenadas, en QGIS andá a Configuración > Opciones > Fuentes de datos y en «Copiar objetos como» elegí «Texto sin formato, geometría WKT» o «GeoJSON».</p>
+      </div>`;
+    enlazarCerrar(caja, cerrarPegar);
+    const ta = $("#pegar-texto");
+    const probar = () => {
+      const lote = leerPegado(ta.value);
+      if (lote) return abrirPegar(lote);
+      $("#pegar-error").hidden = !ta.value.trim();
+      $("#pegar-error").textContent = "Eso no parece copiado de QGIS: tiene que tener una fila de títulos y la geometría (wkt_geom), o ser GeoJSON.";
+    };
+    ta.oninput = probar;
+    ta.focus();
+    return;
+  }
+  quitarMarcasPegar();
+  const items = prepararPegado();
+  const van = items.filter((x) => !x.salta);
+  const motivos = {};
+  for (const x of items) if (x.salta) motivos[x.salta] = (motivos[x.salta] || 0) + 1;
+  const repetidosEnCapa = items.filter((x) => x.salta === "ya existe en la capa" || (!PG.saltearRepetidos && x.codigo
+    && S.datos[PG.capa === "relevamiento" ? "relev" : PG.capa].some((o) => normal(o.codigo) === normal(x.codigo)))).length;
+  const cols = emparejar(PG.lote.titulos, PG.capa);
+  const copian = cols.filter((c) => c.col && c.conocida).map((c) => c.col);
+  const otras = cols.filter((c) => c.col && !c.conocida).map((c) => c.col);
+  const calculadas = cols.filter((c) => !c.col).map((c) => c.titulo);
+  const lista = van.slice(0, 40).map((x) => `<li><b>${esc(x.codigo || "(sin código)")}</b> <span class="nota">${esc(
+    PG.capa === "estructura" ? [x.datos.ESTRUCTURA, x.datos.ESTADO].filter(Boolean).join(" · ")
+      : PG.capa === "obra" ? [x.datos.Localidad, x.datos.Estado].filter(Boolean).join(" · ")
+      : [x.datos["DESCRIPCIÓN"], x.datos.Z != null ? `Z ${x.datos.Z}` : ""].filter(Boolean).join(" · "))}</span></li>`).join("");
+  caja.innerHTML = `${cabeza}
+    <form class="form" id="form-pegar" novalidate>
+      <div class="ficha-bloque">
+        <h2>${PG.lote.filas.length} ${PG.lote.filas.length === 1 ? "elemento copiado" : "elementos copiados"}${PG.lote.origen === "GeoJSON" ? " (GeoJSON)" : " de QGIS"}</h2>
+        <p class="nota" style="margin:0 0 8px">Pegar en la capa:</p>
+        <div class="segmentado" role="radiogroup">
+          ${Object.entries(NOMBRE_DESTINO).map(([k, n]) => `<label><input type="radio" name="destino" value="${k}" ${PG.capa === k ? "checked" : ""}> ${n}</label>`).join("")}
+        </div>
+        <label style="margin-top:10px">Coordenadas de lo copiado
+          <select name="sistema">${Object.entries(SISTEMAS).map(([k, n]) => `<option value="${k}" ${PG.sistema === k ? "selected" : ""}>${n}</option>`).join("")}</select>
+        </label>
+        <p class="nota pista">Se detectó solo. Los puntos que se van a pegar se ven en el mapa: si aparecen corridos, cambiá el sistema.</p>
+      </div>
+      <div class="ficha-bloque">
+        <h2>Columnas</h2>
+        <p class="nota" style="margin:0">${copian.length ? `Se copian: ${copian.map(esc).join(", ")}.` : "Ninguna columna coincide con las de la capa."}</p>
+        ${otras.length ? `<p class="nota" style="margin:6px 0 0">También se intentan: ${otras.map(esc).join(", ")} (se guardan si la capa tiene esa columna; si no, se ignoran).</p>` : ""}
+        ${calculadas.length ? `<p class="nota" style="margin:6px 0 0">No se copian, las pone la base: ${calculadas.map(esc).join(", ")}. La etapa empieza en Proyecto; los hitos se marcan después en la ficha.</p>` : ""}
+      </div>
+      <div class="ficha-bloque">
+        <h2>Se van a pegar ${van.length}</h2>
+        ${repetidosEnCapa ? `<label class="check"><input type="checkbox" name="saltear" ${PG.saltearRepetidos ? "checked" : ""}> No pegar los ${repetidosEnCapa} que ya existen en la capa (mismo código)</label>` : ""}
+        ${Object.keys(motivos).length ? `<ul class="pegar-saltea">${Object.entries(motivos).map(([m, n]) => `<li>${n} ${n === 1 ? "se saltea" : "se saltean"}: ${esc(m)}</li>`).join("")}</ul>` : ""}
+        ${items.some((x) => x.varios) ? `<p class="nota">Hay multipuntos con más de un punto: se usa el primero.</p>` : ""}
+        <ul class="pegar-lista">${lista}${van.length > 40 ? `<li class="nota">y ${van.length - 40} más…</li>` : ""}</ul>
+      </div>
+      <div class="ficha-bloque acciones-nuevo">
+        <p class="nota" id="pegar-progreso" hidden></p>
+        <p class="error" id="pegar-error" hidden></p>
+        <button class="boton boton-primario" type="submit" ${van.length ? "" : "disabled"}>Pegar ${van.length} en ${NOMBRE_DESTINO[PG.capa]}</button>
+        <button class="boton" type="button" id="cancelar-pegar">Cancelar</button>
+      </div>
+    </form>`;
+  enlazarCerrar(caja, cerrarPegar);
+  const f = $("#form-pegar");
+  $("#cancelar-pegar").onclick = cerrarPegar;
+  f.querySelectorAll("input[name=destino]").forEach((r) => (r.onchange = () => { PG.capa = r.value; pintarPegar(); }));
+  f.sistema.onchange = () => { PG.sistema = f.sistema.value; PG.vistoUnaVez = false; pintarPegar(); };
+  if (f.saltear) f.saltear.onchange = () => { PG.saltearRepetidos = f.saltear.checked; pintarPegar(); };
+  f.onsubmit = (ev) => { ev.preventDefault(); pegarTodo(van); };
+  ponerMarcasPegar(items);
+}
+
+function quitarMarcasPegar() { if (PG.marcas) { PG.marcas.remove(); PG.marcas = null; } }
+function ponerMarcasPegar(items) {
+  quitarMarcasPegar();
+  PG.marcas = L.featureGroup(items.filter((x) => x.p).map((x) => L.circleMarker([x.p.lat, x.p.lon], {
+    radius: 7, weight: 2, color: x.salta ? "#8a8a8a" : "#ffffff", fillColor: x.salta ? "#bdbdbd" : "#6CC4D1", fillOpacity: 0.95,
+  }).bindTooltip(`${esc(x.codigo || "(sin código)")}${x.salta ? " · " + esc(x.salta) : ""}`)))
+    .addTo(S.mapa);
+  if (!PG.vistoUnaVez) { PG.vistoUnaVez = true; verMarcasPegar(); }
+}
+function verMarcasPegar() {
+  // solo los que quedan en Uruguay (uno con coordenadas mal no tiene que llevar el mapa al otro lado del mundo)
+  const pts = (PG.marcas?.getLayers() || []).map((m) => m.getLatLng()).filter((l) => dentroDeUruguay(l.lat, l.lng));
+  if (!pts.length) return;
+  const b = L.latLngBounds(pts);
+  // en el celular el panel tapa la parte de abajo del mapa
+  const tapa = movil.matches ? Math.min($("#nuevo").offsetHeight, S.mapa.getSize().y * 0.55) : 0;
+  S.mapa.invalidateSize();
+  S.mapa.fitBounds(b, { maxZoom: 16, paddingTopLeft: [60, 60], paddingBottomRight: [60, tapa + 30] });
+}
+
+async function pegarTodo(van) {
+  const f = $("#form-pegar"), b = f.querySelector("button[type=submit]"), prog = $("#pegar-progreso"), err = $("#pegar-error");
+  PG.corriendo = true; PG.cancelar = false;
+  b.disabled = true;
+  f.querySelectorAll("input, select").forEach((x) => (x.disabled = true));
+  $("#cancelar-pegar").textContent = "Detener";
+  prog.hidden = false;
+  const capa = PG.capa, fallas = [];
+  let ok = 0;
+  for (const [i, x] of van.entries()) {
+    if (PG.cancelar) break;
+    prog.textContent = `Pegando ${i + 1} de ${van.length}… (${x.codigo || "punto"})`;
+    try { await S.api.crearPunto(capa, x.p.lat, x.p.lon, x.datos); ok++; }
+    catch (e) {
+      fallas.push(`${x.codigo || "punto " + (i + 1)}: ${e.message}`);
+      if (/crear_punto|function|schema cache|permiso|editor|failed to fetch|networkerror/i.test(e.message)) break; // no tiene sentido seguir
+    }
+  }
+  PG.corriendo = false;
+  const detenido = PG.cancelar && ok + fallas.length < van.length;
+  prog.textContent = `Se ${ok === 1 ? "pegó 1 elemento" : `pegaron ${ok} elementos`} en ${NOMBRE_DESTINO[capa]}${detenido ? " (detenido antes de terminar)" : ""}.`;
+  if (fallas.length) { err.hidden = false; err.innerHTML = `No se pudieron pegar ${fallas.length}:<br>${fallas.slice(0, 8).map(esc).join("<br>")}${fallas.length > 8 ? "<br>…" : ""}`; }
+  b.hidden = true;
+  $("#cancelar-pegar").textContent = "Listo";
+  $("#cancelar-pegar").onclick = cerrarPegar;
+  if (ok) {
+    aviso(`${ok} ${ok === 1 ? "elemento pegado" : "elementos pegados"}`);
+    if (capa === "relevamiento") S.capaOn.relev = true;
+    else {
+      const id = capa === "estructura" ? "obra_e" : "obras";
+      S.capaOn[id] = true;
+      CAPAS.filter((c) => c.tipo === capa).forEach((c) => (S.capaOn[c.id] = true));
+    }
+    quitarMarcasPegar();
+    await cargar();
+  }
+}
+
+// Ctrl+V en cualquier parte de la web (menos dentro de un campo de texto)
+function alPegar(ev) {
+  const t = ev.target;
+  if (t && (t.closest?.("input, textarea, select, [contenteditable]"))) return;
+  if (!S.perfil || $("#vista-app")?.hidden) return;
+  const lote = leerPegado(ev.clipboardData?.getData("text/plain"));
+  if (!lote) return;
+  ev.preventDefault();
+  if (PG.corriendo) return aviso("Esperá a que termine de pegar lo anterior.", true);
+  abrirPegar(lote);
 }
 
 // ------------------------------------------------------------ relevamiento (como en QGIS: círculo blanco chico con el código)

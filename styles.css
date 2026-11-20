@@ -445,3 +445,13 @@ body.con-tabla .mapa-zona { display: none; }
 }
 
 @media (max-width: 760px) { body.con-tabla .panel { z-index: 1350; } }
+
+/* pegar elementos copiados en QGIS */
+.boton-pegar { margin-top: 8px; justify-self: start; }
+.pegar-texto { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace; resize: vertical; }
+.form label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13.5px; margin: 4px 0 8px; }
+.form label.check input { width: auto; }
+.pegar-saltea { margin: 4px 0 8px; padding-left: 18px; font-size: 13px; color: var(--tinta-suave, #666); }
+.pegar-lista { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow: auto; border-top: 1px solid var(--linea); }
+.pegar-lista li { padding: 5px 0; border-bottom: 1px solid var(--linea); font-size: 13.5px; }
+.pegar-lista .nota { margin-left: 6px; }
