@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="styles.css?v=2026-11-20-19">
+  <link rel="stylesheet" href="styles.css?v=2026-11-20-20">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 9 29h3l1.6-6h4.8l1.6 6h3L16 3Zm0 8 1.8 9h-3.6L16 11Z' fill='%231B2A35'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -117,6 +117,15 @@
             <div id="ajustes-mapa" class="form"></div>
           </section>
           <section class="ajustes-bloque">
+            <h3>Informes para imprimir (PDF A4)</h3>
+            <div class="informes">
+              <button class="boton" type="button" id="inf-curso">Obras en curso y en proyecto</button>
+              <button class="boton" type="button" id="inf-recepciones">Recepciones pendientes</button>
+            </div>
+            <label class="interruptor-fila" style="margin-top:10px"><input type="checkbox" id="inf-filtros"><span id="inf-filtros-texto">Solo lo que dejan ver los filtros</span></label>
+            <p class="nota" style="margin:6px 0 0">En curso: agrupadas por etapa, con su símbolo. Recepciones: las vencidas primero y después las que vencen más lejos.</p>
+          </section>
+          <section class="ajustes-bloque">
             <h3>Datos guardados en este dispositivo</h3>
             <p class="nota" id="ajustes-datos"></p>
             <button class="boton" type="button" id="actualizar-ahora">Actualizar ahora</button>
@@ -139,6 +148,6 @@
 
   <div class="avisos" id="avisos" aria-live="polite"></div>
   <script src="vendor/leaflet/leaflet.js"></script>
-  <script type="module" src="app.js?v=2026-11-20-19"></script>
+  <script type="module" src="app.js?v=2026-11-20-20"></script>
 </body>
 </html>

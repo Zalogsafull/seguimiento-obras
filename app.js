@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-19";
+import { crearApi } from "./api.js?v=2026-11-20-20";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -411,6 +411,8 @@ function mostrarApp() {
   $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
   $("#estado-datos").onclick = () => { if (S.estadoRed === "sinred") actualizar(); };
   $("#actualizar-ahora").onclick = async () => { await actualizar(); pintarAjustes(); };
+  $("#inf-curso").onclick = (ev) => hacerInforme("curso", ev.currentTarget);
+  $("#inf-recepciones").onclick = (ev) => hacerInforme("recepciones", ev.currentTarget);
   prepararMapa();
   prepararPanel();
   const v = leerJSON(CLAVE_VISTA);
@@ -844,9 +846,157 @@ function pintarSolicitudes() {
   cont.querySelectorAll("[data-no]").forEach((b) => (b.onclick = () => resolverPedido(Number(b.dataset.no), false, nombreDe(por(b.dataset.no)), false)));
 }
 
+// ------------------------------------------------------------ informes en PDF (A4 apaisado, las hojas que hagan falta)
+const cargarScript = (src) => new Promise((ok, no) => {
+  if (document.querySelector(`script[src="${src}"]`)) return ok();
+  const el = document.createElement("script");
+  el.src = src; el.onload = ok; el.onerror = () => no(new Error("No se pudo cargar el generador de PDF. Revisá la conexión."));
+  document.head.append(el);
+});
+async function prepararPDF() {
+  await cargarScript("vendor/jspdf/jspdf.umd.min.js");
+  await cargarScript("vendor/jspdf/jspdf.plugin.autotable.min.js");
+  return window.jspdf.jsPDF;
+}
+const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const txt = (v) => (v == null || v === "" ? "—" : String(v));
+
+// Símbolo de QGIS dibujado en el PDF (triángulo, círculo, cuadrado o asterisco con su color)
+function simboloPDF(doc, f, x, y, r, color, borde) {
+  doc.setFillColor(...rgb(color));
+  doc.setDrawColor(...rgb(borde));
+  doc.setLineWidth(borde === "#e0c200" ? 0.6 : 0.25);
+  if (f === "triangulo") doc.triangle(x, y - r, x + r, y + r * 0.8, x - r, y + r * 0.8, "FD");
+  else if (f === "cuadrado") doc.rect(x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7, "FD");
+  else if (f === "asterisco") {
+    doc.setDrawColor(...rgb(color)); doc.setLineWidth(0.7);
+    for (let k = 0; k < 4; k++) { const a = (Math.PI / 4) * k; doc.line(x - r * Math.cos(a), y - r * Math.sin(a), x + r * Math.cos(a), y + r * Math.sin(a)); }
+  } else doc.circle(x, y, r, "FD");
+}
+
+async function hacerInforme(clase, boton) {
+  const original = boton.textContent;
+  boton.disabled = true; boton.textContent = "Armando el PDF…";
+  try {
+    const JsPDF = await prepararPDF();
+    const conFiltros = $("#inf-filtros").checked && filtrosActivos() > 0;
+    const base = todas().filter((x) => !conFiltros || pasaFiltros(x.tipo, x.o));
+    const doc = new JsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    let titulo, archivo, bloques;
+
+    if (clase === "curso") {
+      titulo = "Obras en curso y en proyecto";
+      archivo = "obras-en-curso";
+      const orden = ["infra", "montaje", "hormigonado", "aprobado_e", "aprobado_o", "proyecto"];
+      const ordenar = (a, b) => orden.indexOf(a.cat) - orden.indexOf(b.cat) || String(a.o.codigo).localeCompare(String(b.o.codigo), "es", { numeric: true });
+      const hitos = (o) => (o.hitos_total ? `${o.hitos_hechos ?? 0} de ${o.hitos_total}` : "—");
+      bloques = [
+        { nombre: "Estructuras", xs: base.filter((x) => x.tipo === "estructura" && orden.includes(x.cat)).sort(ordenar),
+          grupo: (x) => CAT[x.cat].nombre,
+          cols: ["", "Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Hitos hechos", "Observaciones"],
+          fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), hitos(o), o.observaciones],
+          anchos: { 8: { cellWidth: 70 } } },
+        { nombre: "Obras", xs: base.filter((x) => x.tipo === "obra" && orden.includes(x.cat)).sort(ordenar),
+          grupo: (x) => CAT[x.cat].nombre,
+          cols: ["", "Código", "Sala", "Localidad", "Departamento", "Licitación", "Tarea", "D.O.", "Hitos hechos"],
+          fila: (o) => [o.codigo, o.sala, o.localidad, o.departamento, o.licitacion, o.tarea, o.director_obra, hitos(o)] },
+      ];
+    } else {
+      titulo = "Recepciones pendientes";
+      archivo = "recepciones-pendientes";
+      const cats = ["vencida", "r3", "r6", "plazo", "sinfecha"];
+      const dias = (o) => (o.dias_para_recepcion == null ? Infinity : o.dias_para_recepcion);
+      const grupo = (x) => {
+        const d = x.o.dias_para_recepcion;
+        return d == null ? "Sin fecha de fin (no se puede calcular el vencimiento)" : d < 0 ? "Vencidas"
+          : d < 90 ? "Vencen en menos de 3 meses" : d < 180 ? "Vencen en 3 a 6 meses" : "Vencen en más de 6 meses";
+      };
+      const sit = (o) => {
+        const d = o.dias_para_recepcion;
+        return d == null ? "—" : d < 0 ? `vencida hace ${-d} días` : d === 0 ? "vence hoy" : `faltan ${d} días`;
+      };
+      bloques = [{ nombre: "Estructuras terminadas sin recepción definitiva",
+        xs: base.filter((x) => x.tipo === "estructura" && cats.includes(x.cat))
+          .sort((a, b) => dias(a.o) - dias(b.o) || String(a.o.codigo).localeCompare(String(b.o.codigo), "es", { numeric: true })),
+        grupo,
+        cols: ["", "Código", "Estructura", "Licitación", "D.O.", "Fin de obra", "Vence la recepción", "Situación", "Recepción hecha"],
+        fila: (o) => [o.codigo, o.estructura, o.licitacion, o.director_obra, fecha(o.fecha_fin), fecha(o.vence_recepcion), sit(o),
+          o.recepcion === "RP" ? "Provisoria" : "Ninguna"],
+        anchos: { 7: { fontStyle: "bold" } } }];
+    }
+
+    const total = bloques.reduce((n, b) => n + b.xs.length, 0);
+    const pie = `${conFiltros ? "Con los filtros activos de la web" : "Todas las estructuras y obras"} · datos ${S.datosDe ? cuandoTexto(S.datosDe) : "de hoy"}`;
+    const cabeza = () => {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(30);
+      doc.text(titulo, 12, 14);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(90);
+      doc.text(`Seguimiento de obras OICI · ${fecha(hoy())}`, W - 12, 14, { align: "right" });
+      doc.text(pie, 12, 19.5);
+    };
+    let y = 25;
+    cabeza();
+    if (!total) {
+      doc.setFontSize(11); doc.setTextColor(60);
+      doc.text("No hay nada para listar" + (conFiltros ? " con los filtros activos." : "."), 12, 32);
+    }
+    for (const b of bloques) {
+      if (!b.xs.length) continue;
+      const body = [], meta = [];
+      let actual = null;
+      for (const x of b.xs) {
+        const g = b.grupo(x);
+        if (g !== actual) {
+          actual = g;
+          const n = b.xs.filter((z) => b.grupo(z) === g).length;
+          body.push([{ content: `${g}  (${n})`, colSpan: b.cols.length, styles: { fillColor: [236, 238, 240], fontStyle: "bold", textColor: 30 } }]);
+          meta.push(null);
+        }
+        body.push(["", ...b.fila(x.o).map(txt)]);
+        const f = forma(x.tipo, x.o), c = CAT[x.cat];
+        meta.push({ f, color: c.color, borde: c.recepcion ? "#e0c200" : "#555555" });
+      }
+      doc.autoTable({
+        startY: y,
+        head: [[{ content: `${b.nombre}  (${b.xs.length})`, colSpan: b.cols.length, styles: { halign: "left", fontSize: 11, fillColor: [44, 44, 44] } }], b.cols],
+        body,
+        theme: "grid",
+        margin: { top: 25, left: 12, right: 12, bottom: 14 },
+        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 1.6, lineColor: [210, 210, 210], lineWidth: 0.15, textColor: 40, overflow: "linebreak" },
+        headStyles: { fillColor: [70, 70, 70], textColor: 255, fontStyle: "bold" },
+        columnStyles: { 0: { cellWidth: 7 }, 1: { fontStyle: "bold" }, ...(b.anchos || {}) },
+        rowPageBreak: "avoid",
+        didDrawCell: (d) => {
+          const m = d.section === "body" && d.column.index === 0 ? meta[d.row.index] : null;
+          if (m) simboloPDF(doc, m.f, d.cell.x + d.cell.width / 2, d.cell.y + d.cell.height / 2, 1.7, m.color, m.borde);
+        },
+        didDrawPage: () => cabeza(),
+      });
+      y = doc.lastAutoTable.finalY + 8;
+    }
+    const n = doc.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setFontSize(8); doc.setTextColor(120);
+      doc.text(`Hoja ${i} de ${n}`, W - 12, H - 7, { align: "right" });
+      doc.text(`${total} en total`, 12, H - 7);
+    }
+    doc.save(`${archivo}-${hoy()}.pdf`);
+    aviso("PDF listo: se descargó " + `${archivo}-${hoy()}.pdf`);
+  } catch (e) {
+    aviso("No se pudo armar el PDF: " + e.message, true);
+  } finally {
+    boton.disabled = false; boton.textContent = original;
+  }
+}
+
 // ------------------------------------------------------------ ajustes (cuenta, mapa y datos guardados)
 function pintarAjustes() {
   pintarSolicitudes();
+  const nf = filtrosActivos(), cf = $("#inf-filtros");
+  cf.disabled = !nf;
+  if (!nf) cf.checked = false;
+  $("#inf-filtros-texto").textContent = nf ? `Solo lo que dejan ver los filtros activos (${nf})` : "Solo lo que dejan ver los filtros (no hay filtros activos)";
   const rol = editor() ? "Editor" : "Solo lectura";
   $("#cuenta-detalle").textContent = [S.usuario?.email, rol, S.perfil?.iniciales_do ? "D.O. " + S.perfil.iniciales_do : ""].filter(Boolean).join(" · ");
   const m = $("#ajustes-mapa");
