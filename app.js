@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-19-4";
+import { crearApi } from "./api.js?v=2026-11-20-1";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -305,6 +305,8 @@ async function entrarApp() {
   mostrar("vista-app");
   $("#nombre-usuario").textContent = S.perfil.nombre + (editor() ? "" : " · solo lectura");
   $("#boton-usuarios").hidden = !S.perfil.admin;
+  $("#boton-nuevo").hidden = !editor();
+  $("#boton-nuevo").onclick = abrirNuevo;
   $("#boton-usuarios").onclick = abrirAdmin;
   $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
   prepararMapa();
@@ -522,6 +524,7 @@ function prepararMapa() {
   S.deptos = L.layerGroup();
   if (S.deptosOn) S.deptos.addTo(S.mapa);
   fetch("datos/departamentos.geojson").then((r) => r.json()).then((gj) => {
+    S.deptosGeo = gj;
     L.geoJSON(gj, {
       pane: "deptos", interactive: false, pointToLayer: () => null,
       style: { color: "#626262", weight: 1, fill: false },
@@ -867,6 +870,284 @@ function prepararPanel() {
   movil.addEventListener("change", aplicarUI);
   addEventListener("resize", aplicarUI);
   aplicarUI();
+}
+
+// ------------------------------------------------------------ punto nuevo
+// Listas del proyecto de QGIS (se suman los valores que ya existen en las capas).
+const LISTA_ESTRUCTURA = ["MONOPOLO 25", "MONOPOLO 40", "MONOPOLO 50", "MÁSTIL 60", "MÁSTIL 75", "MÁSTIL 80", "MÁSTIL 100"];
+const LISTA_DO = ["E.V.", "G.S.", "N.R.", "P.C.", "R.P."];
+
+// Lee coordenadas WGS 84: "-32.28313, -54.85191", "-32.28313 -54.85191" o en grados, minutos y segundos.
+function leerCoordenadas(texto) {
+  const t = String(texto || "").trim();
+  if (!t) return null;
+  let nums;
+  // grados, minutos y segundos: 32°16'59.3"S 54°51'06.9"W (también con O de oeste)
+  const dms = [...t.matchAll(/(-?\d+(?:[.,]\d+)?)\s*[°º]\s*(?:(\d+(?:[.,]\d+)?)\s*['’′]\s*)?(?:(\d+(?:[.,]\d+)?)\s*(?:"|”|″|''))?\s*([NSEOW])?/gi)];
+  if (dms.length >= 2) {
+    const num = (x) => parseFloat(String(x || "0").replace(",", "."));
+    nums = dms.slice(0, 2).map((m) => {
+      let v = Math.abs(num(m[1])) + num(m[2]) / 60 + num(m[3]) / 3600;
+      if (num(m[1]) < 0 || /[SOW]/i.test(m[4] || "")) v = -v;
+      return v;
+    });
+  } else {
+    // decimales: "-32.28313, -54.85191" o "-32.28313 -54.85191"; con coma decimal: "-32,28313 -54,85191"
+    const comaDecimal = !t.includes(".") && /-?\d+,\d+\s+-?\d+,\d+/.test(t);
+    const limpio = comaDecimal ? t.replace(/(\d),(\d)/g, "$1.$2") : t;
+    nums = (limpio.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+    if (nums.length < 2) return null;
+    nums = nums.slice(0, 2);
+  }
+  let [lat, lon] = nums;
+  // En Uruguay latitud y longitud son negativas: si faltan los signos, se agregan.
+  if (lat > 0 && lon > 0) { lat = -lat; lon = -lon; }
+  let invertidas = false;
+  if (lat < -45 && lon > -45) { [lat, lon] = [lon, lat]; invertidas = true; }
+  return { lat, lon, invertidas };
+}
+const dentroDeUruguay = (lat, lon) => lat >= -35.2 && lat <= -29.9 && lon >= -58.6 && lon <= -53;
+
+function departamentoDe(lat, lon) {
+  const dentro = (anillo) => {
+    let c = false;
+    for (let i = 0, j = anillo.length - 1; i < anillo.length; j = i++) {
+      const [xi, yi] = anillo[i], [xj, yj] = anillo[j];
+      if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  for (const f of S.deptosGeo?.features || []) {
+    const g = f.geometry, polis = g.type === "Polygon" ? [g.coordinates] : g.coordinates;
+    if (polis.some((p) => dentro(p[0]) && !p.slice(1).some(dentro))) return f.properties.nombre;
+  }
+  return "";
+}
+
+const NV = { capa: "estructura", marca: null, lat: null, lon: null };
+
+function iconoNuevo() {
+  return L.divIcon({ className: "mk-nuevo", iconSize: [34, 34], iconAnchor: [17, 17],
+    html: `<svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="12" fill="none" stroke="#fff" stroke-width="3"/><circle cx="17" cy="17" r="12" fill="none" stroke="#6CC4D1" stroke-width="1.5"/><path d="M17 1v9M17 24v9M1 17h9M24 17h9" stroke="#fff" stroke-width="2"/><circle cx="17" cy="17" r="2.5" fill="#6CC4D1"/></svg>` });
+}
+
+function ponerMarca(lat, lon, centrar) {
+  NV.lat = lat; NV.lon = lon;
+  if (!NV.marca) {
+    NV.marca = L.marker([lat, lon], { draggable: true, icon: iconoNuevo(), zIndexOffset: 2000, autoPan: true })
+      .addTo(S.mapa)
+      .on("drag", (ev) => actualizarCoordenadas(ev.latlng.lat, ev.latlng.lng))
+      .on("dragend", (ev) => actualizarCoordenadas(ev.target.getLatLng().lat, ev.target.getLatLng().lng));
+  } else NV.marca.setLatLng([lat, lon]);
+  if (centrar) centrarEnMarca();
+  actualizarCoordenadas(lat, lon);
+}
+
+// En el celular el formulario tapa la mitad de abajo: la marca se centra en la parte visible.
+function centrarEnMarca() {
+  if (NV.lat == null) return;
+  S.mapa.setView([NV.lat, NV.lon], Math.max(S.mapa.getZoom(), 15), { animate: false });
+  if (movil.matches) S.mapa.panBy([0, $("#nuevo").offsetHeight / 2], { animate: false });
+}
+
+function actualizarCoordenadas(lat, lon) {
+  NV.lat = lat; NV.lon = lon;
+  const f = $("#form-nuevo");
+  if (!f) return;
+  f.lat.value = lat.toFixed(6);
+  f.lon.value = lon.toFixed(6);
+  $("#ubicacion-ok").hidden = false;
+  $("#aviso-fuera").hidden = dentroDeUruguay(lat, lon);
+  const dep = departamentoDe(lat, lon);
+  $("#depto-detectado").textContent = dep ? "Departamento: " + dep.charAt(0) + dep.slice(1).toLowerCase() : "";
+  if (f.Departamento && !f.Departamento.dataset.tocado) f.Departamento.value = valorExistente(S.datos.obra.map((o) => o.departamento), dep);
+  $("#enlaces-previos").innerHTML = `Se van a cargar los enlaces para llegar:
+    <a href="https://www.google.com/maps/dir/?api=1&destination=${lat}%2C${lon}&travelmode=driving" target="_blank" rel="noopener">Google Maps</a> ·
+    <a href="https://waze.com/ul?ll=${lat},${lon}&navigate=yes" target="_blank" rel="noopener">Waze</a>`;
+}
+
+// Usa la forma en que ya está escrito un valor en la capa (mayúsculas, tildes), si existe.
+function valorExistente(lista, v) {
+  if (!v) return "";
+  return lista.find((x) => x && normal(x) === normal(v)) || v;
+}
+
+function quitarMarca() {
+  if (NV.marca) { NV.marca.remove(); NV.marca = null; }
+  NV.lat = NV.lon = null;
+}
+
+function clickMapaNuevo(ev) {
+  if ($("#nuevo").hidden) return;
+  ponerMarca(ev.latlng.lat, ev.latlng.lng, false);
+}
+
+function cerrarNuevo() {
+  $("#nuevo").hidden = true;
+  quitarMarca();
+  S.mapa.off("click", clickMapaNuevo);
+  $("#mapa").classList.remove("modo-nuevo");
+}
+
+function abrirNuevo() {
+  $("#ficha").hidden = true; $("#admin").hidden = true;
+  const capasOn = { estructura: CAPAS.some((c) => c.tipo === "estructura" && S.capaOn[c.id]), obra: S.capaOn.obras };
+  if (!capasOn[NV.capa]) NV.capa = capasOn.estructura ? "estructura" : capasOn.obra ? "obra" : "estructura";
+  pintarNuevo();
+  $("#nuevo").hidden = false;
+  S.mapa.off("click", clickMapaNuevo).on("click", clickMapaNuevo);
+  $("#mapa").classList.add("modo-nuevo");
+}
+
+function pintarNuevo() {
+  const caja = $("#nuevo");
+  const vals = (tipo, k) => [...new Set(S.datos[tipo].map((o) => o[k]).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "es", { numeric: true }));
+  const opts = (lista, sel) => lista.map((v) => `<option ${v === sel ? "selected" : ""}>${esc(v)}</option>`).join("");
+  const dl = (id, lista) => `<datalist id="${id}">${lista.map((v) => `<option value="${esc(v)}">`).join("")}</datalist>`;
+  const dos = [...new Set([...LISTA_DO, ...vals(NV.capa, "director_obra").flatMap(partesDO)])].sort();
+  const miDO = S.perfil.iniciales_do || "";
+  const est = NV.capa === "estructura";
+  const campos = est ? `
+      <label>Código *<input name="CÓDIGO" required autocomplete="off" placeholder="Ej. CPD"></label>
+      <label>Estructura<select name="ESTRUCTURA">${opts([...new Set([...LISTA_ESTRUCTURA, ...vals("estructura", "estructura")])], "")}</select></label>
+      <div class="dos">
+        <label>Situación<select name="ESTADO"><option value="PROY" selected>Proyecto</option><option value="CONS">En obra</option></select></label>
+        <label>Director de obra<select name="D.O."><option value=""></option>${opts(dos, miDO)}</select></label>
+      </div>
+      <div class="dos">
+        <label>Licitación<input name="LICITACIÓN" list="dl-lic" autocomplete="off"></label>
+        <label>Año<input name="AÑO" type="number" min="2000" max="2100" value="${new Date().getFullYear()}"></label>
+      </div>
+      <label>Fecha de inicio<input name="FECHA INICIO" type="date"></label>
+      <label>Planos (enlace a la carpeta)<input name="PLANOS" type="url" placeholder="https://drive.google.com/…"></label>
+      <label>Observaciones<textarea name="OBSERVACIONES" rows="2"></textarea></label>
+      ${dl("dl-lic", vals("estructura", "licitacion"))}` : `
+      <label>Código *<input name="CÓDIGO" required autocomplete="off"></label>
+      <div class="dos">
+        <label>Tipo<select name="Descripción">${opts([...new Set(["OBRA", "COSITIO", ...vals("obra", "descripcion")])], "OBRA")}</select></label>
+        <label>Situación<select name="Estado"><option value="PROY" selected>Proyecto</option><option value="CONS">En obra</option></select></label>
+      </div>
+      <label>Sala<input name="Sala" list="dl-sala" autocomplete="off"></label>
+      <div class="dos">
+        <label>Localidad<input name="Localidad" list="dl-loc" autocomplete="off"></label>
+        <label>Departamento<input name="Departamento" list="dl-dep" autocomplete="off"></label>
+      </div>
+      <div class="dos">
+        <label>Licitación<input name="Licitación" list="dl-lic" autocomplete="off"></label>
+        <label>Director de obra<select name="D.O."><option value=""></option>${opts(dos, miDO)}</select></label>
+      </div>
+      <label>Tarea<input name="Tarea" list="dl-tarea" autocomplete="off"></label>
+      <label>Planos (enlace a la carpeta)<input name="Planos" type="url" placeholder="https://drive.google.com/…"></label>
+      ${dl("dl-sala", vals("obra", "sala"))}${dl("dl-loc", vals("obra", "localidad"))}${dl("dl-dep", vals("obra", "departamento"))}
+      ${dl("dl-lic", vals("obra", "licitacion"))}${dl("dl-tarea", vals("obra", "tarea"))}`;
+
+  caja.innerHTML = `
+    <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Punto nuevo</h2>
+      <p class="nota" style="margin:0">Buscá las coordenadas o tocá el mapa. Después podés arrastrar la marca para corregir la ubicación.</p></div>
+    <form class="form" id="form-nuevo" novalidate>
+      <div class="ficha-bloque">
+        <h2>Capa</h2>
+        <div class="segmentado" role="radiogroup">
+          <label><input type="radio" name="capa" value="estructura" ${est ? "checked" : ""}> Estructuras OICI Obra</label>
+          <label><input type="radio" name="capa" value="obra" ${est ? "" : "checked"}> Obras</label>
+        </div>
+      </div>
+      <div class="ficha-bloque">
+        <h2>Ubicación (WGS 84)</h2>
+        <div class="buscar-coord">
+          <input name="coord" placeholder="-32.28313, -54.85191" aria-label="Coordenadas WGS 84" autocomplete="off" inputmode="text">
+          <button class="boton" type="button" id="buscar-coord">Buscar</button>
+        </div>
+        <p class="nota pista">Latitud y longitud en grados decimales (como en QGIS) o en grados, minutos y segundos: 32°16'59"S 54°51'07"W.</p>
+        <p class="error" id="error-coord" hidden></p>
+        <div id="ubicacion-ok" hidden>
+          <div class="dos">
+            <label>Latitud<input name="lat" inputmode="decimal"></label>
+            <label>Longitud<input name="lon" inputmode="decimal"></label>
+          </div>
+          <p class="nota" id="depto-detectado" style="margin:6px 0 0"></p>
+          <p class="error" id="aviso-fuera" hidden>Esa ubicación queda fuera de Uruguay. Revisá las coordenadas.</p>
+          <p class="nota" id="enlaces-previos" style="margin:6px 0 0"></p>
+          <button class="boton" type="button" id="ir-marca">Centrar el mapa en la marca</button>
+        </div>
+      </div>
+      <div class="ficha-bloque">
+        <h2>Datos</h2>
+        <div class="form">${campos}</div>
+      </div>
+      <div class="ficha-bloque acciones-nuevo">
+        <p class="error" id="error-nuevo" hidden></p>
+        <button class="boton boton-primario" type="submit">Agregar punto</button>
+        <button class="boton" type="button" id="cancelar-nuevo">Cancelar</button>
+      </div>
+    </form>`;
+
+  enlazarCerrar(caja, cerrarNuevo);
+  const f = $("#form-nuevo");
+  $("#cancelar-nuevo").onclick = cerrarNuevo;
+  f.querySelectorAll("input[name=capa]").forEach((r) => (r.onchange = () => {
+    NV.capa = r.value;
+    const lat = NV.lat, lon = NV.lon;
+    pintarNuevo();
+    if (lat != null) actualizarCoordenadas(lat, lon);
+  }));
+  const buscar = () => {
+    const c = leerCoordenadas(f.coord.value);
+    $("#error-coord").hidden = !!c;
+    if (!c) { $("#error-coord").textContent = "No entendí esas coordenadas. Escribí latitud y longitud, por ejemplo -32.28313, -54.85191."; return; }
+    if (c.invertidas) aviso("Las coordenadas parecían invertidas: puse primero la latitud");
+    ponerMarca(c.lat, c.lon, true);
+  };
+  $("#buscar-coord").onclick = buscar;
+  f.coord.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); buscar(); } };
+  const aMano = () => {
+    const lat = parseFloat(f.lat.value.replace(",", ".")), lon = parseFloat(f.lon.value.replace(",", "."));
+    if (!isNaN(lat) && !isNaN(lon)) ponerMarca(lat, lon, false);
+  };
+  f.lat.onchange = aMano; f.lon.onchange = aMano;
+  $("#ir-marca").onclick = centrarEnMarca;
+  if (f.Departamento) f.Departamento.oninput = () => (f.Departamento.dataset.tocado = "1");
+  f.onsubmit = guardarNuevo;
+  if (NV.lat != null) { $("#ubicacion-ok").hidden = false; }
+}
+
+async function guardarNuevo(ev) {
+  ev.preventDefault();
+  const f = ev.target, err = $("#error-nuevo"), b = f.querySelector("button[type=submit]");
+  const mal = (t) => { err.textContent = t; err.hidden = false; };
+  err.hidden = true;
+  if (NV.lat == null) return mal("Falta la ubicación: buscá las coordenadas o tocá el mapa.");
+  if (!dentroDeUruguay(NV.lat, NV.lon)) return mal("La ubicación queda fuera de Uruguay. Revisá las coordenadas.");
+  const codigo = f["CÓDIGO"].value.trim();
+  if (!codigo) { f["CÓDIGO"].focus(); return mal("Falta el código."); }
+  const repetido = S.datos[NV.capa].find((o) => normal(o.codigo) === normal(codigo));
+  if (repetido && !confirm(`Ya hay ${NV.capa === "estructura" ? "una estructura" : "una obra"} con el código ${repetido.codigo}. ¿La agrego igual?`)) return;
+  const datos = {};
+  f.querySelectorAll(".form [name]").forEach((el) => {
+    if (["capa", "coord", "lat", "lon"].includes(el.name)) return;
+    const v = el.value.trim();
+    if (v !== "") datos[el.name] = v;
+  });
+  b.disabled = true; b.textContent = "Agregando…";
+  try {
+    const id = await S.api.crearPunto(NV.capa, NV.lat, NV.lon, datos);
+    const tipo = NV.capa;
+    aviso(`${codigo} agregado`);
+    cerrarNuevo();
+    // que se vea aunque su capa o categoría estuvieran apagadas
+    const capa = tipo === "estructura" ? "obra_e" : "obras";
+    S.capaOn[capa] = true;
+    S.catOn[`${capa}:proyecto`] = true;
+    S.catOn[`${capa}:hormigonado`] = true;
+    S.catOn[`${capa}:infra`] = true;
+    await cargar();
+    if (id) await abrirFicha(tipo, Number(id));
+  } catch (e) {
+    mal(/crear_punto|function|schema cache/i.test(e.message)
+      ? "Falta preparar la base para agregar puntos: corré sql/parte4_puntos_nuevos.sql en Neon y tocá Refresh schema cache en la Data API."
+      : e.message);
+    b.disabled = false; b.textContent = "Agregar punto";
+  }
 }
 
 iniciar();

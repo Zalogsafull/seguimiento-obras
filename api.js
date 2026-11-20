@@ -64,6 +64,9 @@ async function crearNeon() {
       chequear(await neon.from(TABLA[tipo]).update({ [CAMPO_ESTADO[tipo]]: valor }).eq("fid", id), "Cambiar estado");
     },
     async adminUsuarios() { return chequear(await neon.rpc("admin_usuarios"), "Usuarios"); },
+    async crearPunto(capa, lat, lon, datos) {
+      return chequear(await neon.rpc("crear_punto", { p_capa: capa, p_lat: lat, p_lon: lon, p_datos: datos }), "Agregar punto");
+    },
     async adminHabilitar(user_id, nombre, rol, iniciales) {
       chequear(await neon.rpc("admin_habilitar", { p_user_id: user_id, p_nombre: nombre, p_rol: rol, p_iniciales: iniciales }), "Habilitar");
     },
@@ -149,6 +152,20 @@ function crearDemo() {
     async nuevaContrasena() { await espera(); },
     async perfil() { return { user_id: "demo", nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true }; },
     async adminUsuarios() { await espera(); return structuredClone(cuentas); },
+    async crearPunto(capa, lat, lon, d) {
+      await espera();
+      const lista = capa === "estructura" ? est : obr;
+      const id = Math.max(0, ...lista.map((x) => x.id)) + 1;
+      if (capa === "estructura") {
+        est.push(E(id, d["CÓDIGO"], d["ESTADO"] || "PROY", 1, lat, lon, { estructura: d["ESTRUCTURA"], licitacion: d["LICITACIÓN"],
+          anio: d["AÑO"], director_obra: d["D.O."], fecha_inicio: d["FECHA INICIO"] || null, planos: d["PLANOS"] || null, hitos_total: 6 }));
+      } else {
+        obr.push({ id, codigo: d["CÓDIGO"], estado: d["Estado"] || "PROY", etapa: 1, sala: d["Sala"], localidad: d["Localidad"],
+          departamento: d["Departamento"], licitacion: d["Licitación"], tarea: d["Tarea"], descripcion: d["Descripción"],
+          director_obra: d["D.O."], planos: d["Planos"] || null, lat, lon, hitos_hechos: 0, hitos_total: 2, proximo_vencimiento: null });
+      }
+      return id;
+    },
     async adminHabilitar(id, nombre, rol, ini) {
       Object.assign(cuentas.find((c) => c.user_id === id), { nombre, rol, iniciales_do: ini, habilitado: true });
     },
