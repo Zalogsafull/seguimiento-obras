@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-11";
+import { crearApi } from "./api.js?v=2026-11-20-12";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -744,13 +744,15 @@ function pintarUtilidad() {
         <span class="n">${relevFiltrados().length}</span>
       </div>
       ${S.relevFalta ? `<p class="nota" style="margin:2px 0 6px 26px">Todavía no se puede leer desde la web: hay que correr sql/parte5_relevamiento.sql en Neon.</p>`
-        : `<p class="nota" style="margin:0 0 6px 26px">Puntos tomados con el GPS, con su Z. Se agregan desde + Punto nuevo.</p>`}
+        : `<p class="nota" style="margin:0 0 6px 26px">Puntos tomados con el GPS, con su Z. Como en QGIS, se ven solo de cerca (1:20.000).${S.capaOn.relev && !relevDeCerca() ? ` <button type="button" class="enlace" id="acercar-relev">Acercar para verlos</button>` : ""}</p>`}
       <div class="nodo-capa">
         <span class="sim">${linea}</span>
         <label><input type="checkbox" name="deptos" ${S.deptosOn ? "checked" : ""}> Límites de departamentos</label>
         <span class="n">19</span>
       </div>
     </div>`;
+  const ac = $("#acercar-relev", u);
+  if (ac) ac.onclick = () => S.mapa.setZoom(ZOOM_RELEV);
   u.onchange = (ev) => {
     const el = ev.target;
     if ("relev" in el.dataset) { S.capaOn.relev = el.checked; pintar(); }
@@ -911,6 +913,15 @@ function prepararMapa() {
       },
     }).addTo(S.deptos);
   }).catch(() => {});
+  // al cruzar el zoom en que aparece Relevamiento, se vuelven a dibujar los puntos
+  let cercaAntes = relevDeCerca();
+  S.mapa.on("zoomend", () => {
+    if (relevDeCerca() !== cercaAntes) {
+      cercaAntes = relevDeCerca();
+      if (S.capaOn.relev && S.datos.relev.length) pintar(false);
+      if (UI.modo === "utilidad" && !UI.plegado) pintarUtilidad();
+    }
+  });
   const lejos = () => $("#mapa").classList.toggle("lejos", S.mapa.getZoom() < 8);
   S.mapa.on("zoomend", lejos); lejos();
 }
@@ -939,7 +950,7 @@ function pintarMapa(v) {
     puntos.push([x.o.lat, x.o.lon]);
   }
   for (const r of relevFiltrados()) {
-    if (!S.capaOn.relev || r.lat == null || r.lon == null) continue;
+    if (!S.capaOn.relev || !relevDeCerca() || r.lat == null || r.lon == null) continue;
     const m = L.marker([r.lat, r.lon], { icon: iconoRelev(r), title: `${r.codigo || "Punto"}: relevamiento`, keyboard: false, zIndexOffset: -500 })
       .on("click", (ev) => (MED.activo ? agregarMedida(ev.target.getLatLng()) : abrirRelev(r.id))).addTo(S.mapa);
     S.marcadores.set(`relev:${r.id}`, m);
@@ -1689,6 +1700,9 @@ async function guardarNuevo(ev) {
 
 // ------------------------------------------------------------ relevamiento (como en QGIS: círculo blanco chico con el código)
 const svgRelev = (px = 9) => svgForma("circulo", "#ffffff", "#000000", px, 1);
+// Como en QGIS, la capa solo se dibuja de cerca (escala 1:20.000 o más cerca, que en el mapa es el zoom 15).
+const ZOOM_RELEV = 15;
+const relevDeCerca = () => S.mapa && S.mapa.getZoom() >= ZOOM_RELEV;
 function relevFiltrados() {
   const t = normal(S.f.texto);
   return S.datos.relev.filter((r) => !t || [r.codigo, r.descripcion].some((v) => normal(v).includes(t)));
