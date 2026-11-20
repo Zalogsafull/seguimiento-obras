@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-10";
+import { crearApi } from "./api.js?v=2026-11-20-11";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -243,12 +243,12 @@ async function iniciar() {
     return;
   }
   try {
-    S.api = await crearApi();
-    S.usuario = await S.api.usuario();
+    S.api = await conTiempo(crearApi(), 20000);
+    S.usuario = await conTiempo(S.api.usuario(), 20000);
   } catch (e) {
     mostrar("vista-ingreso");
     $("#error-ingreso").hidden = false;
-    $("#error-ingreso").textContent = "No se pudo conectar con el servidor. Revisá la conexión y recargá la página.";
+    $("#error-ingreso").textContent = "No se pudo conectar con Neon desde esta red. Revisá la conexión y recargá la página; si estás en una red de empresa, puede estar bloqueando el acceso.";
     return;
   }
   prepararIngreso();
@@ -357,9 +357,16 @@ function traducir(m = "") {
 
 async function entrarApp() {
   try {
-    S.perfil = await S.api.perfil();
+    S.perfil = await conTiempo(S.api.perfil(), 20000);
   } catch (e) {
     S.perfil = null;
+    if (sinRed(e)) {
+      // no es que la cuenta no esté habilitada: no hay conexión con la base
+      mostrar("vista-ingreso");
+      $("#error-ingreso").hidden = false;
+      $("#error-ingreso").textContent = "No se pudo conectar con Neon desde esta red. Probá de nuevo; si estás en una red de empresa, puede estar bloqueando el acceso.";
+      return;
+    }
   }
   if (!S.perfil) {
     $("#correo-pendiente").textContent = S.usuario?.email || "";
@@ -395,6 +402,7 @@ function mostrarApp() {
   prepararPanel();
   const v = leerJSON(CLAVE_VISTA);
   if (v?.tab && v.tab !== S.tab && document.querySelector(`[data-tab="${v.tab}"]`)) verTab(v.tab);
+  pintar();
   // al volver la señal, o al volver a la app después de un rato, se actualiza sola
   addEventListener("online", () => actualizar());
   document.addEventListener("visibilitychange", () => {
@@ -445,7 +453,15 @@ async function cargar() {
   } catch (e) {
     // sin señal: se siguen mostrando los datos guardados
     estadoDatos(sinRed(e) ? "sinred" : null);
-    if (!(habia && sinRed(e))) aviso("No se pudieron cargar las obras: " + e.message, true);
+    if (!(habia && sinRed(e))) {
+      const d = document.createElement("div");
+      d.className = "aviso mal";
+      d.textContent = sinRed(e)
+        ? "No llegan los datos desde Neon: esta red no responde o está bloqueando el acceso. Probá con otra conexión."
+        : "No se pudieron cargar las obras: " + e.message;
+      $("#avisos").append(d);
+      setTimeout(() => d.remove(), 9000);
+    }
     pintar();
     return;
   }
