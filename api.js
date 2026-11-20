@@ -164,10 +164,24 @@ function crearDemo() {
   const recalcular = (t, id) => {
     const o = lista(t).find((x) => x.id === id);
     const hs = hitos.filter((h) => h[clave(t)] === id);
-    o.etapa = Math.max(1, ...hs.filter((h) => h.estado === "HECHO" && h.etapa).map((h) => h.etapa));
     o.hitos_hechos = hs.filter((h) => h.estado === "HECHO").length;
-    if (o.etapa >= 5) { o.estado = "FIN"; if (!o.fecha_fin) Object.assign(o, fin(0)); }
-    else if (o.etapa >= 3) o.estado = "CONS";
+    if (t === "estructura") {
+      // mismas reglas que la base (sql/parte8 y parte10)
+      const est = (e) => hs.find((h) => h.etapa === e)?.estado;
+      const ok = (e) => ["HECHO", "NO APLICA"].includes(est(e));
+      const impl = hs.find((h) => /^Implantaci/.test(h.nombre))?.estado === "HECHO";
+      const base = Math.max(1, ...hs.filter((h) => h.estado === "HECHO" && h.etapa >= 2 && h.etapa <= 4).map((h) => h.etapa));
+      const cerrada = est(5) === "HECHO" && ok(3) && ok(4);
+      o.etapa = cerrada ? (est(6) === "HECHO" ? 6 : 5) : est(5) === "EN CURSO" ? Math.max(base, 4) : base;
+      const iniciada = impl || hs.some((h) => h.etapa >= 3 && h.etapa <= 5 && ["HECHO", "EN CURSO"].includes(h.estado));
+      o.estado = cerrada ? "FIN" : iniciada ? "CONS" : "PROY";
+      if (cerrada && !o.fecha_fin) Object.assign(o, fin(0));
+      if (!cerrada) o.fecha_fin = null;
+    } else {
+      o.etapa = Math.max(1, ...hs.filter((h) => h.estado === "HECHO" && h.etapa).map((h) => h.etapa));
+      if (o.etapa >= 5) { o.estado = "FIN"; if (!o.fecha_fin) Object.assign(o, fin(0)); }
+      else if (o.etapa >= 3) o.estado = "CONS";
+    }
     if (o.etapa >= 6) { o.recepcion = "RD"; o.dias_para_recepcion = null; }
   };
   const cuentas = [

@@ -377,3 +377,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ctrl-paneles a { position: relative; }
 .insignia { position: absolute; top: -6px; right: -8px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #D9534F; color: #fff; font: 700 11px/18px var(--texto); text-align: center; box-shadow: 0 0 0 2px var(--fondo); }
 .insignia[hidden] { display: none; }
+
+.en-curso { padding: 4px 10px; border: 1px dashed var(--linea); border-radius: 999px; background: transparent; color: var(--tinta-suave); font: 500 12px/1.2 var(--texto); cursor: pointer; white-space: nowrap; }
+.en-curso:hover { border-color: #6a6a6a; color: var(--tinta); }
+.en-curso[aria-pressed="true"] { border-style: solid; border-color: #3E9E4F; background: rgba(62,158,79,.18); color: #8FD99B; font-weight: 600; }

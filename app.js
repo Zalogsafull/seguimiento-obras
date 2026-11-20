@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-15";
+import { crearApi } from "./api.js?v=2026-11-20-16";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1274,6 +1274,9 @@ function hitoHtml(h) {
     <input type="checkbox" ${hecho ? "checked" : ""} ${dis} aria-label="${esc(h.nombre)} hecho">
     <span class="nom">${esc(h.nombre)}</span>
     ${hecho ? `<input type="date" value="${h.fecha_real || ""}" ${dis} aria-label="Fecha de ${esc(h.nombre)}">`
+      // infraestructura: se puede marcar "en curso" (se está haciendo antes del montaje)
+      : h.etapa === 5 && h.estructura_id && editor()
+      ? `<button type="button" class="en-curso" aria-pressed="${h.estado === "EN CURSO"}" title="Marcá si se está haciendo la infraestructura">${h.estado === "EN CURSO" ? "En curso" : "¿En curso?"}</button>`
       : `<span class="pend">${h.estado === "PENDIENTE" ? (h.fecha_prevista ? "prevista " + fecha(h.fecha_prevista) : "pendiente") : esc(h.estado.toLowerCase())}</span>`}
   </div>`;
 }
@@ -1294,6 +1297,13 @@ function enlazarHito(row, tipo, obraId) {
     ? guardar({ estado: "HECHO", fecha_real: hoy() }, "Hito marcado como hecho")
     : guardar({ estado: "PENDIENTE", fecha_real: null }, "Hito vuelto a pendiente");
   if (fec) fec.onchange = () => fec.value && guardar({ fecha_real: fec.value }, "Fecha del hito guardada");
+  const ec = row.querySelector(".en-curso");
+  if (ec) ec.onclick = () => {
+    ec.disabled = true;
+    ec.getAttribute("aria-pressed") === "true"
+      ? guardar({ estado: "PENDIENTE" }, "Infraestructura vuelta a pendiente")
+      : guardar({ estado: "EN CURSO" }, "Infraestructura en curso: la estructura pasa a Obra de infraestructura");
+  };
 }
 
 // ------------------------------------------------------------ usuarios (solo administradores)
