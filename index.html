@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="styles.css?v=2026-11-20-4">
+  <link rel="stylesheet" href="styles.css?v=2026-11-20-5">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 9 29h3l1.6-6h4.8l1.6 6h3L16 3Zm0 8 1.8 9h-3.6L16 11Z' fill='%231B2A35'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -76,11 +76,7 @@
     <header class="barra">
       <h1 class="marca">Obras <span>OICI</span></h1>
       <div class="usuario">
-        <button class="boton boton-chico" id="instalar" hidden>Instalar app</button>
         <button class="boton boton-chico boton-nuevo" id="boton-nuevo" hidden>+ Punto nuevo</button>
-        <button class="boton boton-chico" id="boton-usuarios" hidden>Usuarios</button>
-        <span id="nombre-usuario"></span>
-        <button class="boton boton-chico" id="salir">Salir</button>
       </div>
     </header>
 
@@ -93,13 +89,35 @@
           <button role="tab" data-tab="lista" aria-selected="false">Lista <span class="cuenta" id="cuenta-lista"></span></button>
           <button role="tab" data-tab="venc" aria-selected="false">Vencimientos</button>
         </div>
-        <button class="plegar-panel" id="plegar-panel" type="button" aria-label="Minimizar panel" title="Minimizar panel">‹</button>
+        <h2 class="titulo-ajustes" id="titulo-ajustes" hidden>Ajustes</h2>
+        <button class="plegar-panel" id="plegar-panel" type="button" aria-label="Cerrar panel" title="Cerrar panel">✕</button>
       </div>
       <div class="panel-cuerpo">
         <div data-panel="capas" id="panel-capas"></div>
         <div data-panel="filtros" id="panel-filtros" hidden></div>
         <div data-panel="lista" hidden><p class="resumen" id="resumen-lista"></p><ol class="lista" id="lista"></ol></div>
         <div data-panel="venc" id="vencimientos" hidden></div>
+        <div data-panel="ajustes" id="panel-ajustes" hidden>
+          <section class="ajustes-bloque">
+            <h3>Mi cuenta</h3>
+            <p class="cuenta-nombre" id="nombre-usuario"></p>
+            <p class="nota" id="cuenta-detalle"></p>
+            <div class="ajustes-botones">
+              <button class="boton" type="button" id="boton-usuarios" hidden>Usuarios y permisos</button>
+              <button class="boton" type="button" id="instalar" hidden>Instalar como app</button>
+              <button class="boton" type="button" id="salir">Salir</button>
+            </div>
+          </section>
+          <section class="ajustes-bloque">
+            <h3>Mapa</h3>
+            <div id="ajustes-mapa" class="form"></div>
+          </section>
+          <section class="ajustes-bloque">
+            <h3>Datos guardados en este dispositivo</h3>
+            <p class="nota" id="ajustes-datos"></p>
+            <button class="boton" type="button" id="actualizar-ahora">Actualizar ahora</button>
+          </section>
+        </div>
       </div>
     </aside>
 
@@ -116,6 +134,6 @@
 
   <div class="avisos" id="avisos" aria-live="polite"></div>
   <script src="vendor/leaflet/leaflet.js"></script>
-  <script type="module" src="app.js?v=2026-11-20-4"></script>
+  <script type="module" src="app.js?v=2026-11-20-5"></script>
 </body>
 </html>

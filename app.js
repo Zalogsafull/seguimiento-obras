@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-4";
+import { crearApi } from "./api.js?v=2026-11-20-5";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -374,7 +374,7 @@ async function entrarApp() {
 }
 
 function ponerUsuario() {
-  $("#nombre-usuario").textContent = S.perfil.nombre + (editor() ? "" : " · solo lectura");
+  $("#nombre-usuario").textContent = S.perfil.nombre;
   $("#boton-usuarios").hidden = !S.perfil.admin;
   $("#boton-nuevo").hidden = !editor();
 }
@@ -389,6 +389,7 @@ function mostrarApp() {
   $("#salir").onclick = salirCuenta;
   $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
   $("#estado-datos").onclick = () => { if (S.estadoRed === "sinred") actualizar(); };
+  $("#actualizar-ahora").onclick = async () => { await actualizar(); pintarAjustes(); };
   prepararMapa();
   prepararPanel();
   const v = leerJSON(CLAVE_VISTA);
@@ -460,11 +461,13 @@ async function cargar() {
   guardarDatos();
   estadoDatos(null);
   pintar();
+  if (UI.modo === "ajustes" && !UI.plegado) pintarAjustes();
 }
 
 // ------------------------------------------------------------ pestañas
 function verTab(t) {
   S.tab = t;
+  if (typeof UI !== "undefined" && UI.modo === "ajustes") { UI.modo = "capas"; guardarUI(); aplicarUI(); }
   escribirJSON(CLAVE_VISTA, { ...(leerJSON(CLAVE_VISTA) || {}), tab: t });
   document.querySelectorAll("#pestanas [data-tab]").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === t));
   document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = d.dataset.panel !== t));
@@ -506,38 +509,55 @@ function pintarCapas() {
   const p = $("#panel-capas");
   p.innerHTML = `${html}${relev}
     <div class="arbol-grupo"><p class="nodo nodo-grupo">Formas</p><div class="formas">${formas}</div></div>
-    <div class="arbol-grupo"><p class="nodo nodo-grupo">Mapa base</p>
-      <div class="bases">${Object.keys(S.base).map((b) => `<label class="nodo"><input type="radio" name="base" value="${b}" ${S.mapa.hasLayer(S.base[b]) ? "checked" : ""}> ${b}</label>`).join("")}</div>
-      ${S.baseNombre.startsWith("Gris") ? `<label class="rango">Calles en el fondo gris <span id="valor-calles">${Math.round(S.callesGris * 100)}%</span>
-        <input type="range" name="calles" min="0" max="80" step="5" value="${Math.round(S.callesGris * 100)}"></label>` : ""}
-      <label class="nodo"><input type="checkbox" name="deptos" ${S.deptosOn ? "checked" : ""}> Departamentos</label></div>
+
     ${filtrosActivos() ? `<p class="nota aviso-filtro">Hay ${filtrosActivos()} filtro${filtrosActivos() > 1 ? "s" : ""} activo${filtrosActivos() > 1 ? "s" : ""}: las cantidades ya los tienen en cuenta.</p>` : ""}`;
   p.querySelectorAll('[data-medio="true"]').forEach((el) => (el.indeterminate = true));
-  const r = p.querySelector("input[name=calles]");
-  if (r) r.oninput = () => {
-    S.callesGris = Number(r.value) / 100;
-    S.base["Gris (como QGIS)"].setOpacity(S.callesGris);
-    $("#valor-calles").textContent = r.value + "%";
-  };
   p.onchange = (ev) => {
     const el = ev.target;
-    if (el.name === "calles") { guardarEstado(); return; }
     if (el.dataset.grupo) CAPAS.filter((c) => c.grupo === el.dataset.grupo).forEach((c) => (S.capaOn[c.id] = el.checked));
     if (el.dataset.capa) S.capaOn[el.dataset.capa] = el.checked;
     if ("relev" in el.dataset) S.capaOn.relev = el.checked;
     if (el.dataset.cat) S.catOn[el.dataset.cat] = el.checked;
-    if (el.name === "base") {
-      S.baseNombre = el.value;
-      for (const [k, l] of Object.entries(S.base)) k === el.value ? l.addTo(S.mapa) : l.remove();
-      $("#mapa").classList.toggle("fondo-oscuro", el.value.startsWith("Gris"));
-    }
-    if (el.name === "deptos") { S.deptosOn = el.checked; el.checked ? S.deptos.addTo(S.mapa) : S.deptos.remove(); }
     pintar();
   };
   p.onclick = (ev) => {
     const b = ev.target.closest("[data-plegar]");
     if (b) { S.abiertoArbol[b.dataset.plegar] = !S.abiertoArbol[b.dataset.plegar]; guardarEstado(); pintarCapas(); }
   };
+}
+
+// ------------------------------------------------------------ ajustes (cuenta, mapa y datos guardados)
+function pintarAjustes() {
+  const rol = editor() ? "Editor" : "Solo lectura";
+  $("#cuenta-detalle").textContent = [S.usuario?.email, rol, S.perfil?.iniciales_do ? "D.O. " + S.perfil.iniciales_do : ""].filter(Boolean).join(" · ");
+  const m = $("#ajustes-mapa");
+  m.innerHTML = `
+    <div class="segmentado bases-seg" role="radiogroup" aria-label="Mapa base">${Object.keys(S.base).map((b) =>
+      `<label><input type="radio" name="base" value="${b}" ${S.baseNombre === b ? "checked" : ""}> ${b === "Gris (como QGIS)" ? "Gris" : b}</label>`).join("")}</div>
+    ${S.baseNombre.startsWith("Gris") ? `<label class="rango">Calles en el fondo gris <span id="valor-calles">${Math.round(S.callesGris * 100)}%</span>
+      <input type="range" name="calles" min="0" max="80" step="5" value="${Math.round(S.callesGris * 100)}"></label>` : ""}
+    <label class="interruptor-fila"><input type="checkbox" name="deptos" ${S.deptosOn ? "checked" : ""}><span>Límites de departamentos</span></label>`;
+  const r = m.querySelector("input[name=calles]");
+  if (r) r.oninput = () => {
+    S.callesGris = Number(r.value) / 100;
+    S.base["Gris (como QGIS)"].setOpacity(S.callesGris);
+    $("#valor-calles").textContent = r.value + "%";
+  };
+  m.onchange = (ev) => {
+    const el = ev.target;
+    if (el.name === "base") {
+      S.baseNombre = el.value;
+      for (const [k, l] of Object.entries(S.base)) k === el.value ? l.addTo(S.mapa) : l.remove();
+      $("#mapa").classList.toggle("fondo-oscuro", el.value.startsWith("Gris"));
+      pintarAjustes();
+    }
+    if (el.name === "deptos") { S.deptosOn = el.checked; el.checked ? S.deptos.addTo(S.mapa) : S.deptos.remove(); }
+    guardarEstado();
+  };
+  const fichas = Object.keys(leerJSON(CLAVE_FICHAS) || {}).length;
+  $("#ajustes-datos").textContent = S.datosDe
+    ? `Datos ${cuandoTexto(S.datosDe)}, con ${fichas} ficha${fichas === 1 ? "" : "s"} guardada${fichas === 1 ? "" : "s"} para ver sin señal.`
+    : "Todavía no hay datos guardados.";
 }
 
 // ------------------------------------------------------------ filtros
@@ -594,6 +614,7 @@ function pintarPanel(rehacerFiltros = true) {
   if (S.tab === "filtros" && rehacerFiltros) pintarFiltros();
   if (S.tab === "lista") pintarLista(v);
   if (S.tab === "venc") pintarVencimientos();
+  if (UI.modo === "ajustes") pintarAjustes();
   return v;
 }
 
@@ -649,7 +670,9 @@ function pintarVencimientos() {
 // ------------------------------------------------------------ mapa
 function prepararMapa() {
   if (S.mapa) return;
-  S.mapa = L.map("mapa", { zoomControl: true, attributionControl: true }).setView([-32.6, -56.0], 7);
+  S.mapa = L.map("mapa", { zoomControl: false, attributionControl: true }).setView([-32.6, -56.0], 7);
+  agregarBotonesPaneles();
+  L.control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(S.mapa);
   agregarBotonUbicacion();
   agregarBotonMedir();
   leerEstado();
@@ -992,7 +1015,7 @@ window.addEventListener("appinstalled", () => { $("#instalar").hidden = true; av
 // Celular: arrastrar la agarradera de arriba cambia el alto; tocarla o "▾" lo minimiza.
 const CLAVE_UI = "obras-oici-panel-v1";
 const movil = matchMedia("(max-width: 760px)");
-const UI = { ancho: 380, alto: Math.round(innerHeight * 0.45), plegado: false };
+const UI = { ancho: 380, alto: Math.round(innerHeight * 0.45), plegado: false, modo: "capas" };
 try { Object.assign(UI, JSON.parse(localStorage.getItem(CLAVE_UI) || "{}")); } catch (e) { /* valores de siempre */ }
 const guardarUI = () => { try { localStorage.setItem(CLAVE_UI, JSON.stringify(UI)); } catch (e) { /* sin almacenamiento */ } };
 const HOJA_MIN = 70;
@@ -1006,22 +1029,60 @@ function aplicarUI() {
   raiz.setProperty("--panel-ancho", movil.matches ? "100%" : UI.ancho + "px");
   raiz.setProperty("--hoja", UI.alto + "px");
   app.classList.toggle("plegado", UI.plegado);
+  if (UI.modo !== "ajustes") UI.modo = "capas";
+  const aj = UI.modo === "ajustes";
+  $("#pestanas").hidden = aj;
+  $("#titulo-ajustes").hidden = !aj;
+  document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = aj ? d.dataset.panel !== "ajustes" : d.dataset.panel !== S.tab));
+  document.querySelectorAll(".ctrl-paneles a").forEach((a) => {
+    const on = !UI.plegado && a.dataset.modo === UI.modo;
+    a.classList.toggle("activo", on);
+    a.setAttribute("aria-pressed", on);
+  });
   const b = $("#plegar-panel");
-  b.textContent = movil.matches ? (UI.plegado ? "▴" : "▾") : "‹";
-  b.setAttribute("aria-label", UI.plegado ? "Mostrar panel" : "Minimizar panel");
+  b.textContent = "✕";
+  b.setAttribute("aria-label", "Cerrar panel");
   b.title = b.getAttribute("aria-label");
-  $("#abrir-panel").hidden = !(UI.plegado && !movil.matches);
+  $("#abrir-panel").hidden = true;
   setTimeout(() => S.mapa && S.mapa.invalidateSize(), 220);
 }
 
 function plegar(v) { UI.plegado = v; guardarUI(); aplicarUI(); }
 
+// Botones a la izquierda del mapa: abren y cierran el panel de Capas o el de Ajustes.
+function abrirModo(modo) {
+  if (!UI.plegado && UI.modo === modo) return plegar(true);
+  UI.modo = modo;
+  UI.plegado = false;
+  guardarUI(); aplicarUI();
+  if (modo === "ajustes") pintarAjustes(); else pintarPanel();
+}
+function agregarBotonesPaneles() {
+  const ICONOS = {
+    capas: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3.5 21 8l-9 4.5L3 8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m3 12 9 4.5 9-4.5M3 16l9 4.5 9-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    ajustes: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M10.3 2.8h3.4l.5 2.6 1.6.9 2.5-.9 1.7 2.9-2 1.8v1.8l2 1.8-1.7 2.9-2.5-.9-1.6.9-.5 2.6h-3.4l-.5-2.6-1.6-.9-2.5.9-1.7-2.9 2-1.8v-1.8l-2-1.8 1.7-2.9 2.5.9 1.6-.9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
+  };
+  const Ctrl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const div = L.DomUtil.create("div", "leaflet-bar ctrl-paneles");
+      for (const [modo, titulo] of [["capas", "Capas, filtros, lista y vencimientos"], ["ajustes", "Ajustes: cuenta y mapa"]]) {
+        const a = L.DomUtil.create("a", "", div);
+        a.href = "#"; a.role = "button"; a.dataset.modo = modo; a.title = titulo; a.setAttribute("aria-label", titulo);
+        a.innerHTML = ICONOS[modo];
+        L.DomEvent.on(a, "click", (ev) => { L.DomEvent.preventDefault(ev); abrirModo(modo); });
+      }
+      L.DomEvent.disableClickPropagation(div);
+      return div;
+    },
+  });
+  new Ctrl().addTo(S.mapa);
+}
+
 function prepararPanel() {
   const asa = $("#asa"), panel = $("#panel");
   $("#plegar-panel").onclick = () => plegar(!UI.plegado);
   $("#abrir-panel").onclick = () => plegar(false);
-  // en el celular, tocar una pestaña con el panel minimizado lo vuelve a abrir
-  $("#pestanas").addEventListener("click", () => { if (UI.plegado && movil.matches) plegar(false); });
   let inicio = null;
   asa.onpointerdown = (ev) => {
     inicio = { x: ev.clientX, y: ev.clientY, movio: false };
@@ -1451,7 +1512,7 @@ function abrirRelev(id) {
 function agregarBotonUbicacion() {
   let punto = null, radio = null, buscando = false;
   const Ctrl = L.Control.extend({
-    options: { position: "topleft" },
+    options: { position: "topright" },
     onAdd() {
       const div = L.DomUtil.create("div", "leaflet-bar ctrl-ubicacion");
       const a = L.DomUtil.create("a", "", div);
@@ -1523,7 +1584,7 @@ const ICONO_REGLA = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden
 
 function agregarBotonMedir() {
   const Ctrl = L.Control.extend({
-    options: { position: "topleft" },
+    options: { position: "topright" },
     onAdd() {
       const div = L.DomUtil.create("div", "leaflet-bar ctrl-medir");
       const a = L.DomUtil.create("a", "", div);

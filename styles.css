@@ -216,7 +216,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .panel-cabeza { padding-top: 0; }
   .abrir-panel { display: none; }
   .barra { gap: 10px; padding: 0 12px; }
-  .barra .marca span, #nombre-usuario { display: none; }
+  .barra .marca span { display: none; }
   .ficha, .admin { width: 100%; }
   .codigo { font-size: 38px; }
 }
@@ -297,13 +297,33 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .medida-botones { display: flex; align-items: center; gap: 6px; flex: none; }
 .medida .cerrar { width: 34px; height: 34px; border: 1px solid var(--linea); border-radius: 6px; background: #383838; color: var(--tinta); cursor: pointer; font-size: 15px; }
 @media (max-width: 760px) {
-  .medida { left: 56px; right: 10px; transform: none; max-width: none; flex-wrap: wrap; gap: 6px 10px; }
+  .medida { left: 58px; right: 58px; transform: none; max-width: none; flex-wrap: wrap; gap: 6px 10px; }
   .medida-botones { margin-left: auto; }
 }
 
 /* Datos guardados / sin conexión */
-.estado-datos { position: absolute; z-index: 800; top: 10px; right: 10px; max-width: calc(100% - 80px); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--linea); background: rgba(44,44,44,.94); color: var(--tinta-suave); font: 500 12.5px/1.2 var(--texto, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 2px 8px rgba(0,0,0,.4); cursor: default; }
+.estado-datos { position: absolute; z-index: 800; top: 10px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 140px); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--linea); background: rgba(44,44,44,.94); color: var(--tinta-suave); font: 500 12.5px/1.2 var(--texto, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 2px 8px rgba(0,0,0,.4); cursor: default; }
 .estado-datos[data-modo="sinred"] { color: #F2C14E; border-color: #6B5A2A; cursor: pointer; }
 .estado-datos[data-modo="actualizando"]::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--acento); vertical-align: 1px; animation: latido 1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .estado-datos::before { animation: none !important; } }
-.mapa-zona:has(.medida) .estado-datos { top: 112px; }
+.mapa-zona:has(.medida) .estado-datos { top: 76px; }
+@media (max-width: 760px) { .mapa-zona:has(.medida) .estado-datos { top: 112px; } }
+
+/* Botones de paneles (izquierda) y panel de Ajustes */
+.ctrl-paneles a { display: flex !important; align-items: center; justify-content: center; width: 38px !important; height: 38px !important; }
+.ctrl-paneles a.activo, .ctrl-paneles a.activo:hover { background: var(--acento-fuerte) !important; color: #fff !important; }
+.titulo-ajustes { flex: 1; margin: 0; padding: 8px 4px 10px; font: 600 17px/1.2 var(--cond); color: var(--tinta); }
+.ajustes-bloque { padding: 14px 16px 16px; border-bottom: 1px solid var(--linea-suave); }
+.ajustes-bloque h3 { margin: 0 0 10px; font: 600 14px/1.2 var(--cond); color: var(--tinta-suave); letter-spacing: .02em; }
+.cuenta-nombre { margin: 0; font-size: 17px; font-weight: 600; color: var(--tinta); }
+#cuenta-detalle { margin: 2px 0 12px; overflow-wrap: anywhere; }
+.ajustes-botones { display: flex; flex-wrap: wrap; gap: 8px; }
+#ajustes-mapa { display: grid; gap: 12px; }
+#ajustes-mapa .rango, #ajustes-mapa .interruptor-fila { margin: 0; }
+#ajustes-datos { margin: 0 0 10px; }
+.bases-seg label { padding: 9px 4px; }
+@media (max-width: 760px) {
+  .app.plegado .panel { display: none; }
+}
+.mapa-zona { grid-column: 2; grid-row: 2; }
+@media (max-width: 760px) { .mapa-zona { grid-column: 1; } }
