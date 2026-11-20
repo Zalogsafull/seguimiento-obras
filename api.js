@@ -43,6 +43,7 @@ async function crearNeon() {
     },
     async estructuras() { return chequear(await neon.from("v_estructuras").select("*"), "Estructuras"); },
     async obras() { return chequear(await neon.from("v_obras").select("*"), "Obras"); },
+    async relevamiento() { return chequear(await neon.from("v_relevamiento").select("*"), "Relevamiento"); },
     async una(tipo, id) {
       const vista = tipo === "estructura" ? "v_estructuras" : "v_obras";
       return chequear(await neon.from(vista).select("*").eq("id", id).single(), "Obra");
@@ -110,6 +111,11 @@ function crearDemo() {
     "Infraestructura terminada (fin de obra)", "Recepción provisoria", "Recepción definitiva"],
     obra: ["Proyecto aprobado", "Infraestructura terminada (fin de obra)"] };
   const etapaDe = { estructura: [2, 3, 4, 5, null, 6], obra: [2, 5] };
+  const relev = [
+    { id: 1, codigo: "P1", descripcion: "Poste de UTE frente al predio", z: "38.42", lat: -34.8812, lon: -56.1765 },
+    { id: 2, codigo: "P2", descripcion: "Esquina del cerco", z: "37.95", lat: -34.8806, lon: -56.1781 },
+    { id: 3, codigo: "BM", descripcion: "Mojón de referencia", z: null, lat: -34.7905, lon: -55.8512 },
+  ];
   let hid = 1, cid = 1;
   const hitos = [], cuaderno = [];
   for (const [tipo, lista] of [["estructura", est], ["obra", obr]]) {
@@ -154,6 +160,11 @@ function crearDemo() {
     async adminUsuarios() { await espera(); return structuredClone(cuentas); },
     async crearPunto(capa, lat, lon, d) {
       await espera();
+      if (capa === "relevamiento") {
+        const id = Math.max(0, ...relev.map((x) => x.id)) + 1;
+        relev.push({ id, codigo: d["CÓDIGO"] || null, descripcion: d["DESCRIPCIÓN"] || null, z: d["Z"] ?? null, lat, lon });
+        return id;
+      }
       const lista = capa === "estructura" ? est : obr;
       const id = Math.max(0, ...lista.map((x) => x.id)) + 1;
       if (capa === "estructura") {
@@ -175,6 +186,7 @@ function crearDemo() {
     },
     async estructuras() { await espera(); return structuredClone(est); },
     async obras() { await espera(); return structuredClone(obr); },
+    async relevamiento() { await espera(); return structuredClone(relev); },
     async una(t, id) { return structuredClone(lista(t).find((x) => x.id === id)); },
     async hitos(t, id) { return structuredClone(hitos.filter((h) => h[clave(t)] === id)); },
     async cuaderno(t, id) { return structuredClone(cuaderno.filter((c) => c[clave(t)] === id).reverse()); },

@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-2";
+import { crearApi } from "./api.js?v=2026-11-20-3";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -102,8 +102,8 @@ function aviso(texto, mal = false) {
 // ------------------------------------------------------------ estado
 const S = {
   api: null, usuario: null, perfil: null,
-  datos: { estructura: [], obra: [] },
-  capaOn: Object.fromEntries(CAPAS.map((c) => [c.id, c.on])),
+  datos: { estructura: [], obra: [], relev: [] },
+  capaOn: { ...Object.fromEntries(CAPAS.map((c) => [c.id, c.on])), relev: true },
   catOn: Object.fromEntries(CAPAS.flatMap((c) => c.cats.map((k) => [`${c.id}:${k}`, !(c.apagadas || []).includes(k)]))),
   abiertoArbol: Object.fromEntries(CAPAS.map((c) => [c.id, c.on])),
   f: { mias: false, texto: "", director: "", licitacion: "", estructura: "", anio: "" },
@@ -322,6 +322,13 @@ async function cargar() {
   } catch (e) {
     aviso("No se pudieron cargar las obras: " + e.message, true);
   }
+  try {
+    S.datos.relev = (await S.api.relevamiento()) || [];
+    S.relevFalta = false;
+  } catch (e) {
+    S.datos.relev = [];
+    S.relevFalta = true; // falta correr sql/parte5_relevamiento.sql
+  }
   pintar();
 }
 
@@ -360,8 +367,13 @@ function pintarCapas() {
   const formas = [["estructura", { estructura: "MÁSTIL" }, "Mástil"], ["estructura", { estructura: "MONOPOLO" }, "Monopolo"],
     ["obra", { descripcion: "OBRA" }, "Obra"], ["obra", { descripcion: "COSITIO" }, "Cositio"]]
     .map(([tp, o, nm]) => `<span>${svgForma(forma(tp, o), "#ffffff", "#52626D", forma(tp, o) === "asterisco" ? 15 : 12)}${nm}</span>`).join("");
+  const relev = `<div class="arbol-grupo"><div class="nodo-capa">
+      <span class="sim">${svgRelev(11)}</span>
+      <label><input type="checkbox" data-relev ${S.capaOn.relev ? "checked" : ""}> Relevamiento</label>
+      <span class="n">${relevFiltrados().length}</span></div>
+      ${S.relevFalta ? `<p class="nota" style="margin:4px 0 0">Todavía no se puede leer desde la web: hay que correr sql/parte5_relevamiento.sql en Neon.</p>` : ""}</div>`;
   const p = $("#panel-capas");
-  p.innerHTML = `${html}
+  p.innerHTML = `${html}${relev}
     <div class="arbol-grupo"><p class="nodo nodo-grupo">Formas</p><div class="formas">${formas}</div></div>
     <div class="arbol-grupo"><p class="nodo nodo-grupo">Mapa base</p>
       <div class="bases">${Object.keys(S.base).map((b) => `<label class="nodo"><input type="radio" name="base" value="${b}" ${S.mapa.hasLayer(S.base[b]) ? "checked" : ""}> ${b}</label>`).join("")}</div>
@@ -381,6 +393,7 @@ function pintarCapas() {
     if (el.name === "calles") { guardarEstado(); return; }
     if (el.dataset.grupo) CAPAS.filter((c) => c.grupo === el.dataset.grupo).forEach((c) => (S.capaOn[c.id] = el.checked));
     if (el.dataset.capa) S.capaOn[el.dataset.capa] = el.checked;
+    if ("relev" in el.dataset) S.capaOn.relev = el.checked;
     if (el.dataset.cat) S.catOn[el.dataset.cat] = el.checked;
     if (el.name === "base") {
       S.baseNombre = el.value;
@@ -507,6 +520,7 @@ function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: true, attributionControl: true }).setView([-32.6, -56.0], 7);
   agregarBotonUbicacion();
+  agregarBotonMedir();
   leerEstado();
   // Gris como QGIS: calles en escala de grises invertida, muy atenuadas sobre el gris #212121.
   S.base["Gris (como QGIS)"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -559,9 +573,15 @@ function pintarMapa(v) {
   for (const x of v) {
     if (x.o.lat == null || x.o.lon == null) continue;
     const m = L.marker([x.o.lat, x.o.lon], { icon: icono(x.tipo, x.o, x.cat), title: `${x.o.codigo}: ${CAT[x.cat].nombre}`, keyboard: false })
-      .on("click", () => abrirFicha(x.tipo, x.o.id)).addTo(S.mapa);
+      .on("click", (ev) => (MED.activo ? agregarMedida(ev.target.getLatLng()) : abrirFicha(x.tipo, x.o.id))).addTo(S.mapa);
     S.marcadores.set(`${x.tipo}:${x.o.id}`, m);
     puntos.push([x.o.lat, x.o.lon]);
+  }
+  for (const r of relevFiltrados()) {
+    if (!S.capaOn.relev || r.lat == null || r.lon == null) continue;
+    const m = L.marker([r.lat, r.lon], { icon: iconoRelev(r), title: `${r.codigo || "Punto"}: relevamiento`, keyboard: false, zIndexOffset: -500 })
+      .on("click", (ev) => (MED.activo ? agregarMedida(ev.target.getLatLng()) : abrirRelev(r.id))).addTo(S.mapa);
+    S.marcadores.set(`relev:${r.id}`, m);
   }
   if (S.primeraVez && puntos.length) {
     S.mapa.fitBounds(puntos, { padding: [30, 30], maxZoom: 11 });
@@ -570,6 +590,19 @@ function pintarMapa(v) {
 }
 
 // ------------------------------------------------------------ ficha
+// Planos, Google Maps y Waze en una fila (mismos enlaces que arma QGIS).
+const ICONO = {
+  planos: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  maps: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5s-6.5-6.2-6.5-11.3a6.5 6.5 0 0 1 13 0c0 5.1-6.5 11.3-6.5 11.3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="10.2" r="2.4" fill="currentColor"/></svg>',
+  waze: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 20.5 12 16.3 4 20.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  copiar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 5.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+};
+function atajo(href, icono, texto) {
+  return href
+    ? `<a class="atajo" href="${esc(href)}" target="_blank" rel="noopener">${ICONO[icono]}<span>${texto}</span></a>`
+    : `<span class="atajo apagado" title="Sin ${texto.toLowerCase()} cargados">${ICONO[icono]}<span>${texto}</span></span>`;
+}
+
 const barraCerrar = (texto) => `<div class="cabeza-acciones">
   <button type="button" class="volver"><span aria-hidden="true">‹</span> ${texto}</button>
   <button type="button" class="cerrar" aria-label="Cerrar" title="Cerrar">✕</button></div>`;
@@ -620,15 +653,7 @@ function pintarFicha(tipo, o, hitos, notas) {
        ["Inicio", fecha(o.fecha_inicio)], ["Fin", fecha(o.fecha_fin)], ["Recepción", o.recepcion || "—"]]
     : [["Sala", o.sala], ["Localidad", o.localidad], ["Departamento", o.departamento], ["Licitación", o.licitacion],
        ["Tarea", o.tarea], ["Descripción", o.descripcion], ["Director de obra", o.director_obra]];
-  // Planos, Google Maps y Waze en una fila (mismos enlaces que arma QGIS).
-  const ICONO = {
-    planos: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
-    maps: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5s-6.5-6.2-6.5-11.3a6.5 6.5 0 0 1 13 0c0 5.1-6.5 11.3-6.5 11.3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="10.2" r="2.4" fill="currentColor"/></svg>',
-    waze: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 20.5 12 16.3 4 20.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
-  };
-  const boton = (href, icono, texto) => href
-    ? `<a class="atajo" href="${esc(href)}" target="_blank" rel="noopener">${ICONO[icono]}<span>${texto}</span></a>`
-    : `<span class="atajo apagado" title="Sin ${texto.toLowerCase()} cargados">${ICONO[icono]}<span>${texto}</span></span>`;
+  const boton = atajo;
   const enlaces = `<div class="atajos">
       ${boton(o.planos, "planos", "Planos")}
       ${boton(o.lat != null ? `https://www.google.com/maps/dir/?api=1&destination=${o.lat}%2C${o.lon}&travelmode=driving` : "", "maps", "Maps")}
@@ -935,7 +960,7 @@ function departamentoDe(lat, lon) {
   return "";
 }
 
-const NV = { capa: "estructura", marca: null, lat: null, lon: null };
+const NV = { capa: "estructura", marca: null, lat: null, lon: null, z: "" };
 
 function iconoNuevo() {
   return L.divIcon({ className: "mk-nuevo", iconSize: [34, 34], iconAnchor: [17, 17],
@@ -989,7 +1014,7 @@ function quitarMarca() {
 }
 
 function clickMapaNuevo(ev) {
-  if ($("#nuevo").hidden) return;
+  if ($("#nuevo").hidden || MED.activo) return;
   ponerMarca(ev.latlng.lat, ev.latlng.lng, false);
 }
 
@@ -1001,8 +1026,9 @@ function cerrarNuevo() {
 }
 
 function abrirNuevo() {
+  if (MED.activo) terminarMedida();
   $("#ficha").hidden = true; $("#admin").hidden = true;
-  const capasOn = { estructura: CAPAS.some((c) => c.tipo === "estructura" && S.capaOn[c.id]), obra: S.capaOn.obras };
+  const capasOn = { estructura: CAPAS.some((c) => c.tipo === "estructura" && S.capaOn[c.id]), obra: S.capaOn.obras, relevamiento: S.capaOn.relev };
   if (!capasOn[NV.capa]) NV.capa = capasOn.estructura ? "estructura" : capasOn.obra ? "obra" : "estructura";
   pintarNuevo();
   $("#nuevo").hidden = false;
@@ -1012,13 +1038,18 @@ function abrirNuevo() {
 
 function pintarNuevo() {
   const caja = $("#nuevo");
-  const vals = (tipo, k) => [...new Set(S.datos[tipo].map((o) => o[k]).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "es", { numeric: true }));
+  const vals = (tipo, k) => [...new Set((S.datos[tipo] || []).map((o) => o[k]).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "es", { numeric: true }));
   const opts = (lista, sel) => lista.map((v) => `<option ${v === sel ? "selected" : ""}>${esc(v)}</option>`).join("");
   const dl = (id, lista) => `<datalist id="${id}">${lista.map((v) => `<option value="${esc(v)}">`).join("")}</datalist>`;
   const dos = [...new Set([...LISTA_DO, ...vals(NV.capa, "director_obra").flatMap(partesDO)])].sort();
   const miDO = S.perfil.iniciales_do || "";
   const est = NV.capa === "estructura";
-  const campos = est ? `
+  const relev = NV.capa === "relevamiento";
+  const campos = relev ? `
+      <label>Código<input name="CÓDIGO" autocomplete="off" placeholder="Ej. P1"></label>
+      <label>Descripción<textarea name="DESCRIPCIÓN" rows="2" placeholder="Qué es el punto"></textarea></label>
+      <label>Z (altura en metros)<input name="Z" inputmode="decimal" autocomplete="off" value="${esc(NV.z)}" placeholder="Se completa con el GPS"></label>
+      <p class="nota" style="margin:0">Con "Usar mi ubicación (GPS)" se cargan la posición y la Z que da el celular, como en QField. Si el celular no da la altura, escribila a mano.</p>` : est ? `
       <label>Código *<input name="CÓDIGO" required autocomplete="off" placeholder="Ej. CPD"></label>
       <label>Estructura<select name="ESTRUCTURA">${opts([...new Set([...LISTA_ESTRUCTURA, ...vals("estructura", "estructura")])], "")}</select></label>
       <div class="dos">
@@ -1060,11 +1091,15 @@ function pintarNuevo() {
         <h2>Capa</h2>
         <div class="segmentado" role="radiogroup">
           <label><input type="radio" name="capa" value="estructura" ${est ? "checked" : ""}> Estructuras OICI Obra</label>
-          <label><input type="radio" name="capa" value="obra" ${est ? "" : "checked"}> Obras</label>
+          <label><input type="radio" name="capa" value="obra" ${NV.capa === "obra" ? "checked" : ""}> Obras</label>
+          <label><input type="radio" name="capa" value="relevamiento" ${relev ? "checked" : ""}> Relevamiento</label>
         </div>
       </div>
       <div class="ficha-bloque">
         <h2>Ubicación (WGS 84)</h2>
+        <button class="boton boton-gps" type="button" id="usar-gps">${ICONO_GPS}<span>Usar mi ubicación (GPS)</span></button>
+        <p class="nota" id="gps-info" hidden style="margin:6px 0 0"></p>
+        <p class="nota pista" style="margin:10px 0 6px">O buscá por coordenadas:</p>
         <div class="buscar-coord">
           <input name="coord" placeholder="-32.28313, -54.85191" aria-label="Coordenadas WGS 84" autocomplete="off" inputmode="text">
           <button class="boton" type="button" id="buscar-coord">Buscar</button>
@@ -1118,8 +1153,38 @@ function pintarNuevo() {
   f.lat.onchange = aMano; f.lon.onchange = aMano;
   $("#ir-marca").onclick = centrarEnMarca;
   if (f.Departamento) f.Departamento.oninput = () => (f.Departamento.dataset.tocado = "1");
+  if (f.Z) f.Z.oninput = () => (NV.z = f.Z.value);
+  $("#usar-gps").onclick = usarGps;
   f.onsubmit = guardarNuevo;
   if (NV.lat != null) { $("#ubicacion-ok").hidden = false; }
+}
+
+const ICONO_GPS = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+
+// Posición del celular para el punto nuevo; en Relevamiento también la altura (Z).
+function usarGps() {
+  if (!navigator.geolocation) return aviso("Este navegador no permite obtener la ubicación.", true);
+  const b = $("#usar-gps"), txt = b.querySelector("span"), info = $("#gps-info");
+  b.disabled = true; txt.textContent = "Buscando ubicación…";
+  const listo = () => { b.disabled = false; txt.textContent = "Usar mi ubicación (GPS)"; };
+  navigator.geolocation.getCurrentPosition((pos) => {
+    listo();
+    const c = pos.coords;
+    ponerMarca(c.latitude, c.longitude, true);
+    const f = $("#form-nuevo");
+    let texto = `Ubicación del GPS, precisión ±${Math.round(c.accuracy)} m.`;
+    if (f && f.Z) {
+      if (c.altitude != null) {
+        NV.z = f.Z.value = c.altitude.toFixed(2);
+        texto += ` Z ${numero(c.altitude, 2)} m` + (c.altitudeAccuracy != null ? ` (±${Math.round(c.altitudeAccuracy)} m).` : ".");
+      } else texto += " El celular no dio la altura: escribí la Z a mano.";
+    }
+    info.textContent = texto; info.hidden = false;
+  }, (err) => {
+    listo();
+    aviso(err.code === 1 ? "No diste permiso para ver tu ubicación. Activalo en los permisos del navegador para este sitio."
+      : "No se pudo obtener tu ubicación. Revisá que el GPS esté prendido.", true);
+  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
 }
 
 async function guardarNuevo(ev) {
@@ -1129,22 +1194,33 @@ async function guardarNuevo(ev) {
   err.hidden = true;
   if (NV.lat == null) return mal("Falta la ubicación: buscá las coordenadas o tocá el mapa.");
   if (!dentroDeUruguay(NV.lat, NV.lon)) return mal("La ubicación queda fuera de Uruguay. Revisá las coordenadas.");
+  const relev = NV.capa === "relevamiento";
   const codigo = f["CÓDIGO"].value.trim();
-  if (!codigo) { f["CÓDIGO"].focus(); return mal("Falta el código."); }
-  const repetido = S.datos[NV.capa].find((o) => normal(o.codigo) === normal(codigo));
-  if (repetido && !confirm(`Ya hay ${NV.capa === "estructura" ? "una estructura" : "una obra"} con el código ${repetido.codigo}. ¿La agrego igual?`)) return;
+  if (!codigo && !relev) { f["CÓDIGO"].focus(); return mal("Falta el código."); }
+  if (relev && f.Z.value.trim() && isNaN(Number(f.Z.value.trim().replace(",", ".")))) { f.Z.focus(); return mal("La Z tiene que ser un número en metros, por ejemplo 34,5."); }
+  const existentes = S.datos[relev ? "relev" : NV.capa];
+  const repetido = codigo && existentes.find((o) => normal(o.codigo) === normal(codigo));
+  const que = { estructura: "una estructura", obra: "una obra", relevamiento: "un punto de relevamiento" }[NV.capa];
+  if (repetido && !confirm(`Ya hay ${que} con el código ${repetido.codigo}. ¿Lo agrego igual?`)) return;
   const datos = {};
   f.querySelectorAll(".form [name]").forEach((el) => {
     if (["capa", "coord", "lat", "lon"].includes(el.name)) return;
     const v = el.value.trim();
-    if (v !== "") datos[el.name] = v;
+    if (v !== "") datos[el.name] = el.name === "Z" ? v.replace(",", ".") : v;
   });
   b.disabled = true; b.textContent = "Agregando…";
   try {
     const id = await S.api.crearPunto(NV.capa, NV.lat, NV.lon, datos);
     const tipo = NV.capa;
-    aviso(`${codigo} agregado`);
+    aviso(`${codigo || "Punto"} agregado`);
     cerrarNuevo();
+    NV.z = "";
+    if (tipo === "relevamiento") {
+      S.capaOn.relev = true;
+      await cargar();
+      if (id) abrirRelev(Number(id));
+      return;
+    }
     // que se vea aunque su capa o categoría estuvieran apagadas
     const capa = tipo === "estructura" ? "obra_e" : "obras";
     S.capaOn[capa] = true;
@@ -1154,11 +1230,65 @@ async function guardarNuevo(ev) {
     await cargar();
     if (id) await abrirFicha(tipo, Number(id));
   } catch (e) {
-    mal(/crear_punto|function|schema cache/i.test(e.message)
+    mal(NV.capa === "relevamiento" && /crear_punto|function|schema cache|desconocida|Relevamiento/i.test(e.message)
+      ? "Falta preparar la base para el relevamiento: corré sql/parte5_relevamiento.sql en Neon y tocá Refresh schema cache en la Data API."
+      : /crear_punto|function|schema cache/i.test(e.message)
       ? "Falta preparar la base para agregar puntos: corré sql/parte4_puntos_nuevos.sql en Neon y tocá Refresh schema cache en la Data API."
       : e.message);
     b.disabled = false; b.textContent = "Agregar punto";
   }
+}
+
+// ------------------------------------------------------------ relevamiento (como en QGIS: círculo blanco chico con el código)
+const svgRelev = (px = 9) => svgForma("circulo", "#ffffff", "#000000", px, 1);
+function relevFiltrados() {
+  const t = normal(S.f.texto);
+  return S.datos.relev.filter((r) => !t || [r.codigo, r.descripcion].some((v) => normal(v).includes(t)));
+}
+function iconoRelev(r) {
+  const activo = S.abierta && S.abierta.tipo === "relev" && S.abierta.id === r.id;
+  return L.divIcon({ className: `mk mk-relev${activo ? " activo" : ""}`,
+    html: `${svgRelev()}<span style="left:12px">${esc(r.codigo || "")}</span>`, iconSize: [9, 9], iconAnchor: [4.5, 4.5] });
+}
+const numero = (v, dec) => (v == null || v === "" || isNaN(Number(v)) ? "—"
+  : Number(v).toLocaleString("es-UY", { minimumFractionDigits: dec, maximumFractionDigits: dec }));
+
+function abrirRelev(id) {
+  const r = S.datos.relev.find((x) => x.id === id);
+  if (!r) return;
+  $("#admin").hidden = true;
+  S.abierta = { tipo: "relev", id };
+  const ficha = $("#ficha");
+  ficha.hidden = false;
+  const coord = `${Number(r.lat).toFixed(6)}, ${Number(r.lon).toFixed(6)}`;
+  ficha.innerHTML = `
+    <div class="ficha-cabeza">
+      ${barraCerrar("Volver al mapa")}
+      <p class="codigo">${esc(r.codigo || "Sin código")}</p>
+      <p class="tipo-obra">Punto de relevamiento</p>
+      <div class="atajos">
+        ${atajo(`https://www.google.com/maps/dir/?api=1&destination=${r.lat}%2C${r.lon}&travelmode=driving`, "maps", "Maps")}
+        ${atajo(`https://waze.com/ul?ll=${r.lat},${r.lon}&navigate=yes`, "waze", "Waze")}
+        <button type="button" class="atajo" id="copiar-coord">${ICONO.copiar}<span>Copiar</span></button>
+      </div>
+    </div>
+    <div class="ficha-bloque">
+      <h2>Datos</h2>
+      <dl class="datos">
+        <dt>Descripción</dt><dd>${esc(r.descripcion) || "—"}</dd>
+        <dt>Latitud</dt><dd>${Number(r.lat).toFixed(6)}</dd>
+        <dt>Longitud</dt><dd>${Number(r.lon).toFixed(6)}</dd>
+        <dt>Z</dt><dd>${r.z == null || r.z === "" ? "—" : numero(r.z, 2) + " m"}</dd>
+      </dl>
+    </div>`;
+  enlazarCerrar(ficha, cerrarFicha);
+  $("#copiar-coord", ficha).onclick = async () => {
+    try { await navigator.clipboard.writeText(coord); aviso("Coordenadas copiadas: " + coord); }
+    catch (e) { aviso("No se pudo copiar. Coordenadas: " + coord, true); }
+  };
+  pintar();
+  const m = S.marcadores.get(`relev:${id}`);
+  if (m && window.innerWidth > 760) S.mapa.panTo(m.getLatLng());
 }
 
 // ------------------------------------------------------------ mi ubicación
@@ -1197,6 +1327,135 @@ function agregarBotonUbicacion() {
     },
   });
   new Ctrl().addTo(S.mapa);
+}
+
+// ------------------------------------------------------------ medir distancias (como la regla de QField)
+const MED = { activo: false, puntos: [], grupo: null, guia: null, caja: null, boton: null, cursor: null };
+
+// Distancia sobre el elipsoide WGS 84 (Vincenty), igual que mide QGIS.
+function distancia(a, b) {
+  const A = 6378137, F = 1 / 298.257223563, B = A * (1 - F), rad = Math.PI / 180;
+  const L0 = (b.lng - a.lng) * rad;
+  const U1 = Math.atan((1 - F) * Math.tan(a.lat * rad)), U2 = Math.atan((1 - F) * Math.tan(b.lat * rad));
+  const sU1 = Math.sin(U1), cU1 = Math.cos(U1), sU2 = Math.sin(U2), cU2 = Math.cos(U2);
+  let l = L0, lp, it = 0, sS, cS, sg, c2A, c2Sm;
+  do {
+    const sl = Math.sin(l), cl = Math.cos(l);
+    sS = Math.sqrt((cU2 * sl) ** 2 + (cU1 * sU2 - sU1 * cU2 * cl) ** 2);
+    if (sS === 0) return 0;
+    cS = sU1 * sU2 + cU1 * cU2 * cl;
+    sg = Math.atan2(sS, cS);
+    const sA = (cU1 * cU2 * sl) / sS;
+    c2A = 1 - sA * sA;
+    c2Sm = c2A ? cS - (2 * sU1 * sU2) / c2A : 0;
+    const C = (F / 16) * c2A * (4 + F * (4 - 3 * c2A));
+    lp = l;
+    l = L0 + (1 - C) * F * sA * (sg + C * sS * (c2Sm + C * cS * (-1 + 2 * c2Sm * c2Sm)));
+  } while (Math.abs(l - lp) > 1e-12 && ++it < 200);
+  if (it >= 200) return L.latLng(a).distanceTo(b);
+  const u2 = (c2A * (A * A - B * B)) / (B * B);
+  const kA = 1 + (u2 / 16384) * (4096 + u2 * (-768 + u2 * (320 - 175 * u2)));
+  const kB = (u2 / 1024) * (256 + u2 * (-128 + u2 * (74 - 47 * u2)));
+  const dS = kB * sS * (c2Sm + (kB / 4) * (cS * (-1 + 2 * c2Sm * c2Sm) - (kB / 6) * c2Sm * (-3 + 4 * sS * sS) * (-3 + 4 * c2Sm * c2Sm)));
+  return B * kA * (sg - dS);
+}
+const metros = (m) => (m < 1000
+  ? `${m.toLocaleString("es-UY", { maximumFractionDigits: m < 100 ? 2 : 1 })} m`
+  : `${(m / 1000).toLocaleString("es-UY", { maximumFractionDigits: m < 10000 ? 3 : 2 })} km`);
+
+const ICONO_REGLA = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3.2 15.6 15.6 3.2l5.2 5.2L8.4 20.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 11.8l1.8 1.8M9.6 9.2l2.6 2.6M12.2 6.6l1.8 1.8M14.8 4l2.6 2.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+
+function agregarBotonMedir() {
+  const Ctrl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const div = L.DomUtil.create("div", "leaflet-bar ctrl-medir");
+      const a = L.DomUtil.create("a", "", div);
+      a.href = "#"; a.role = "button"; a.title = "Medir distancias"; a.setAttribute("aria-label", "Medir distancias");
+      a.innerHTML = ICONO_REGLA;
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.on(a, "click", (ev) => { L.DomEvent.preventDefault(ev); MED.activo ? terminarMedida() : empezarMedida(); });
+      MED.boton = div;
+      return div;
+    },
+  });
+  new Ctrl().addTo(S.mapa);
+  MED.grupo = L.layerGroup().addTo(S.mapa);
+}
+
+function empezarMedida() {
+  if (!$("#nuevo").hidden) cerrarNuevo();
+  MED.activo = true; MED.puntos = []; MED.cursor = null;
+  MED.boton.classList.add("activo");
+  $("#mapa").classList.add("modo-medir");
+  const caja = document.createElement("div");
+  caja.className = "medida";
+  caja.setAttribute("role", "status");
+  caja.innerHTML = `<div class="medida-cifras"><b id="med-total">0 m</b><span id="med-detalle"></span></div>
+    <div class="medida-botones">
+      <button type="button" class="boton boton-chico" id="med-deshacer">Deshacer</button>
+      <button type="button" class="boton boton-chico" id="med-borrar">Borrar</button>
+      <button type="button" class="cerrar" id="med-cerrar" aria-label="Terminar de medir" title="Terminar de medir">✕</button>
+    </div>`;
+  $(".mapa-zona").appendChild(caja);
+  MED.caja = caja;
+  $("#med-deshacer").onclick = () => { MED.puntos.pop(); dibujarMedida(); };
+  $("#med-borrar").onclick = () => { MED.puntos = []; dibujarMedida(); };
+  $("#med-cerrar").onclick = terminarMedida;
+  S.mapa.on("click", clickMedida).on("mousemove", moverMedida).on("mouseout", salirMedida);
+  document.addEventListener("keydown", teclaMedida);
+  dibujarMedida();
+}
+
+function terminarMedida() {
+  MED.activo = false; MED.puntos = []; MED.cursor = null;
+  MED.grupo.clearLayers();
+  MED.caja?.remove(); MED.caja = null;
+  MED.boton.classList.remove("activo");
+  $("#mapa").classList.remove("modo-medir");
+  S.mapa.off("click", clickMedida).off("mousemove", moverMedida).off("mouseout", salirMedida);
+  document.removeEventListener("keydown", teclaMedida);
+}
+
+function clickMedida(ev) { agregarMedida(ev.latlng); }
+function agregarMedida(ll) { MED.puntos.push(L.latLng(ll.lat, ll.lng)); dibujarMedida(); }
+function moverMedida(ev) { if (MED.puntos.length) { MED.cursor = ev.latlng; dibujarMedida(); } }
+function salirMedida() { if (MED.cursor) { MED.cursor = null; dibujarMedida(); } }
+function teclaMedida(ev) {
+  if (ev.target.closest("input, textarea, select")) return;
+  if (ev.key === "Escape") terminarMedida();
+  else if (ev.key === "Backspace" || (ev.key === "z" && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); MED.puntos.pop(); dibujarMedida(); }
+}
+
+function dibujarMedida() {
+  const g = MED.grupo, p = MED.puntos;
+  g.clearLayers();
+  const linea = (pts, extra = {}) => {
+    L.polyline(pts, { color: "#1a1a1a", weight: 6, opacity: 0.55, interactive: false, ...extra }).addTo(g);
+    L.polyline(pts, { color: "#FFC53D", weight: 3, interactive: false, ...extra }).addTo(g);
+  };
+  if (p.length > 1) linea(p);
+  if (p.length && MED.cursor) linea([p[p.length - 1], MED.cursor], { dashArray: "6 6" });
+  let total = 0;
+  p.forEach((q, i) => {
+    if (i) {
+      const d = distancia(p[i - 1], q);
+      total += d;
+      const medio = L.latLng((p[i - 1].lat + q.lat) / 2, (p[i - 1].lng + q.lng) / 2);
+      L.marker(medio, { interactive: false, keyboard: false,
+        icon: L.divIcon({ className: "med-eti", html: `<span>${metros(d)}</span>`, iconSize: [0, 0] }) }).addTo(g);
+    }
+    L.circleMarker(q, { radius: i ? 4.5 : 5.5, color: "#1a1a1a", weight: 2, fillColor: i ? "#ffffff" : "#FFC53D", fillOpacity: 1, interactive: false }).addTo(g);
+  });
+  if (!MED.caja) return;
+  const extra = p.length && MED.cursor ? distancia(p[p.length - 1], MED.cursor) : 0;
+  $("#med-total").textContent = metros(total + extra);
+  $("#med-detalle").textContent = !p.length ? "Tocá el mapa para marcar el primer punto"
+    : p.length === 1 && !extra ? "Tocá el siguiente punto"
+    : extra ? `hasta el cursor, ${metros(extra)} el último tramo`
+    : `${p.length - 1} tramo${p.length > 2 ? "s" : ""}, el último ${metros(distancia(p[p.length - 2], p[p.length - 1]))}`;
+  $("#med-deshacer").disabled = !p.length;
+  $("#med-borrar").disabled = !p.length;
 }
 
 iniciar();
