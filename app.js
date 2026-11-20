@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-1";
+import { crearApi } from "./api.js?v=2026-11-20-2";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -506,6 +506,7 @@ function pintarVencimientos() {
 function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: true, attributionControl: true }).setView([-32.6, -56.0], 7);
+  agregarBotonUbicacion();
   leerEstado();
   // Gris como QGIS: calles en escala de grises invertida, muy atenuadas sobre el gris #212121.
   S.base["Gris (como QGIS)"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -619,10 +620,20 @@ function pintarFicha(tipo, o, hitos, notas) {
        ["Inicio", fecha(o.fecha_inicio)], ["Fin", fecha(o.fecha_fin)], ["Recepción", o.recepcion || "—"]]
     : [["Sala", o.sala], ["Localidad", o.localidad], ["Departamento", o.departamento], ["Licitación", o.licitacion],
        ["Tarea", o.tarea], ["Descripción", o.descripcion], ["Director de obra", o.director_obra]];
-  const enlaces = [
-    o.planos ? `<a href="${esc(o.planos)}" target="_blank" rel="noopener">Planos</a>` : "",
-    o.lat != null ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${o.lat},${o.lon}" target="_blank" rel="noopener">Cómo llegar</a>` : "",
-  ].filter(Boolean).join(" · ");
+  // Planos, Google Maps y Waze en una fila (mismos enlaces que arma QGIS).
+  const ICONO = {
+    planos: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    maps: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5s-6.5-6.2-6.5-11.3a6.5 6.5 0 0 1 13 0c0 5.1-6.5 11.3-6.5 11.3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="10.2" r="2.4" fill="currentColor"/></svg>',
+    waze: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 20.5 12 16.3 4 20.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  };
+  const boton = (href, icono, texto) => href
+    ? `<a class="atajo" href="${esc(href)}" target="_blank" rel="noopener">${ICONO[icono]}<span>${texto}</span></a>`
+    : `<span class="atajo apagado" title="Sin ${texto.toLowerCase()} cargados">${ICONO[icono]}<span>${texto}</span></span>`;
+  const enlaces = `<div class="atajos">
+      ${boton(o.planos, "planos", "Planos")}
+      ${boton(o.lat != null ? `https://www.google.com/maps/dir/?api=1&destination=${o.lat}%2C${o.lon}&travelmode=driving` : "", "maps", "Maps")}
+      ${boton(o.lat != null ? `https://waze.com/ul?ll=${o.lat},${o.lon}&navigate=yes` : "", "waze", "Waze")}
+    </div>`;
 
   const opciones = [["PROY", "Proyecto"], ["CONS", "En obra"], ["FIN", "Terminada"]]
     .map(([v, n]) => `<option value="${v}" ${o.estado === v ? "selected" : ""}>${n}</option>`).join("");
@@ -635,6 +646,7 @@ function pintarFicha(tipo, o, hitos, notas) {
       <p class="tipo-obra">${tipo === "estructura" ? "Estructura" : "Obra"}${o.localidad ? ", " + esc(o.localidad) : ""}</p>
       <div class="escalera" aria-hidden="true">${tramos}</div>
       <p class="etapa-actual">${simbolo(tipo, o, cat)}${esc(c.nombre)} <small>${esc(detalle)}</small></p>
+      ${enlaces}
     </div>
 
     <div class="ficha-bloque">
@@ -658,7 +670,6 @@ function pintarFicha(tipo, o, hitos, notas) {
     <div class="ficha-bloque">
       <h2>Datos</h2>
       <dl class="datos">${datos.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v ?? "—") || "—"}</dd>`).join("")}</dl>
-      ${enlaces ? `<p>${enlaces}</p>` : ""}
       ${editor() ? `<label class="form" style="margin-top:10px">Situación
         <select id="cambiar-estado">${opciones}</select></label>
         <p class="nota" style="margin-top:6px">Pasá a "En obra" cuando arranca. El fin se marca con su hito.</p>` : ""}
@@ -1148,6 +1159,44 @@ async function guardarNuevo(ev) {
       : e.message);
     b.disabled = false; b.textContent = "Agregar punto";
   }
+}
+
+// ------------------------------------------------------------ mi ubicación
+function agregarBotonUbicacion() {
+  let punto = null, radio = null, buscando = false;
+  const Ctrl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const div = L.DomUtil.create("div", "leaflet-bar ctrl-ubicacion");
+      const a = L.DomUtil.create("a", "", div);
+      a.href = "#"; a.role = "button"; a.title = "Ir a mi ubicación"; a.setAttribute("aria-label", "Ir a mi ubicación");
+      a.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.on(a, "click", (ev) => {
+        L.DomEvent.preventDefault(ev);
+        if (!navigator.geolocation) return aviso("Este navegador no permite obtener la ubicación.", true);
+        if (buscando) return;
+        buscando = true; div.classList.add("buscando");
+        navigator.geolocation.getCurrentPosition((pos) => {
+          buscando = false; div.classList.remove("buscando");
+          const ll = [pos.coords.latitude, pos.coords.longitude], prec = pos.coords.accuracy;
+          if (!punto) {
+            radio = L.circle(ll, { radius: prec, color: "#4A90E2", weight: 1, fillColor: "#4A90E2", fillOpacity: 0.12, interactive: false }).addTo(S.mapa);
+            punto = L.circleMarker(ll, { radius: 7, color: "#fff", weight: 2.5, fillColor: "#2F80ED", fillOpacity: 1 })
+              .bindTooltip("Estás acá").addTo(S.mapa);
+          } else { punto.setLatLng(ll); radio.setLatLng(ll).setRadius(prec); }
+          S.mapa.setView(ll, Math.max(S.mapa.getZoom(), 14));
+          if (movil.matches && !$("#nuevo").hidden) S.mapa.panBy([0, $("#nuevo").offsetHeight / 2], { animate: false });
+        }, (err) => {
+          buscando = false; div.classList.remove("buscando");
+          aviso(err.code === 1 ? "No diste permiso para ver tu ubicación. Activalo en los permisos del navegador para este sitio."
+            : "No se pudo obtener tu ubicación. Revisá que el GPS esté prendido.", true);
+        }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+      });
+      return div;
+    },
+  });
+  new Ctrl().addTo(S.mapa);
 }
 
 iniciar();

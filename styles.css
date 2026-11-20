@@ -263,3 +263,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ficha input, .ficha select, .ficha textarea, .admin input, .admin select { width: 100%; min-width: 0; max-width: 100%; }
 .ficha input[type=checkbox], .ficha input[type=radio], .hito input[type=date] { width: auto; }
 .segmentado label { min-width: 0; }
+
+/* ---------- atajos de la ficha: planos, Google Maps, Waze ---------- */
+.atajos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.atajo { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 10px 6px; border: 1px solid var(--linea); border-radius: 8px; background: #383838; color: var(--tinta) !important; text-decoration: none; font-size: 14px; font-weight: 500; min-width: 0; }
+.atajo svg { width: 20px; height: 20px; flex: none; color: var(--acento); }
+.atajo:hover { background: #444; border-color: #5A5A5A; }
+.atajo.apagado { opacity: .4; cursor: not-allowed; }
+.atajo span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- botón de mi ubicación ---------- */
+.ctrl-ubicacion a { display: flex !important; align-items: center; justify-content: center; }
+.ctrl-ubicacion.buscando a { color: var(--acento); animation: latido 1s ease-in-out infinite; }
+@keyframes latido { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .ctrl-ubicacion.buscando a { animation: none; } }
