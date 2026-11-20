@@ -1,14 +1,15 @@
-import { crearApi } from "./api.js?v=2026-11-20-18";
+import { crearApi } from "./api.js?v=2026-11-20-19";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
 const CAT = {
-  proyecto:    { nombre: "Proyecto",                color: "#f6f6f6", grupo: "proyecto" },
+  // la etapa dice lo que se está haciendo (Hormigonando); el hito, lo que ya se terminó (Hormigonado)
+  proyecto:    { nombre: "En proyecto",             color: "#f6f6f6", grupo: "proyecto" },
   aprobado_e:  { nombre: "P. ejecutivo aprobado",   color: "#7ec8f0", grupo: "proyecto" },
   aprobado_o:  { nombre: "Proyecto aprobado",       color: "#7ec8f0", grupo: "proyecto" },
-  hormigonado: { nombre: "Hormigonado",             color: "#d7191c", grupo: "obra" },
-  montaje:     { nombre: "Montaje",                 color: "#f2d024", grupo: "obra" },
-  infra:       { nombre: "Obra de infraestructura", color: "#2e9e44", grupo: "obra" },
+  hormigonado: { nombre: "Hormigonando",            color: "#d7191c", grupo: "obra" },
+  montaje:     { nombre: "Montando",                color: "#f2d024", grupo: "obra" },
+  infra:       { nombre: "En infraestructura",      color: "#2e9e44", grupo: "obra" },
   r6:          { nombre: "Recepción en 3 a 6 meses", color: "#f2d024", grupo: "recepcion", recepcion: true },
   r3:          { nombre: "Recepción en menos de 3 meses", color: "#f08a24", grupo: "recepcion", recepcion: true },
   vencida:     { nombre: "Recepción vencida",       color: "#c1272d", grupo: "recepcion", recepcion: true },
@@ -874,7 +875,7 @@ function pintarReferencias() {
       ${f("obra", { descripcion: "OBRA" }, "Obra")}${f("obra", { descripcion: "COSITIO" }, "Cositio")}</ul></section>
     <section class="ajustes-bloque"><h3>Etapa de la obra (color)</h3><ul class="leyenda">
       ${c("proyecto")}${c("aprobado_e")}${c("hormigonado")}${c("montaje")}${c("infra")}</ul>
-      <p class="nota" style="margin:8px 0 0">En la capa Obras solo hay Proyecto, Proyecto aprobado y Obra de infraestructura.</p></section>
+      <p class="nota" style="margin:8px 0 0">La etapa dice lo que se está haciendo; los hitos, lo que ya se terminó. En la capa Obras solo hay En proyecto, Proyecto aprobado y En infraestructura.</p></section>
     <section class="ajustes-bloque"><h3>Recepción (borde amarillo, más grande)</h3><ul class="leyenda">
       ${c("r6")}${c("r3")}${c("vencida")}</ul></section>
     <section class="ajustes-bloque"><h3>Terminadas (borde oscuro)</h3><ul class="leyenda">
@@ -1315,7 +1316,7 @@ function enlazarHito(row, tipo, obraId) {
     ec.disabled = true;
     ec.getAttribute("aria-pressed") === "true"
       ? guardar({ estado: "PENDIENTE" }, "Infraestructura vuelta a pendiente")
-      : guardar({ estado: "EN CURSO" }, "Infraestructura en curso: la estructura pasa a Obra de infraestructura");
+      : guardar({ estado: "EN CURSO" }, "Infraestructura en curso: la estructura pasa a En infraestructura");
   };
 }
 
