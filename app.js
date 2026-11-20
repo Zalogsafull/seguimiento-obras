@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-26";
+import { crearApi } from "./api.js?v=2026-11-20-27";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -14,6 +14,7 @@ const CAT = {
   r3:          { nombre: "Recepción en menos de 3 meses", color: "#f08a24", grupo: "recepcion", recepcion: true },
   vencida:     { nombre: "Recepción vencida",       color: "#c1272d", grupo: "recepcion", recepcion: true },
   plazo:       { nombre: "Recepción en plazo",      color: "#8fcf98", grupo: "recepcion", recepcion: true },
+  sinfecha:    { nombre: "Recepción sin fecha de fin", color: "#bdbdbd", grupo: "recepcion", recepcion: true },
   // capa terminadas: todas las que tienen fin de obra, según la recepción que tengan
   sinrecep:    { nombre: "Terminada, sin provisoria", color: "#c8c8c8", grupo: "cerrada", terminada: true },
   provisoria:  { nombre: "Terminada, con provisoria", color: "#a9a9a9", grupo: "cerrada", terminada: true },
@@ -25,7 +26,7 @@ const CAPAS = [
   { id: "obra_e", grupo: "ESTRUCTURAS", nombre: "Estructuras OICI Obra", tipo: "estructura",
     cats: ["proyecto", "aprobado_e", "hormigonado", "montaje", "infra"], on: true },
   { id: "recep", grupo: "ESTRUCTURAS", nombre: "Estructuras OICI Recepciones", tipo: "estructura",
-    cats: ["plazo", "r6", "r3", "vencida"], on: true },
+    cats: ["plazo", "r6", "r3", "vencida", "sinfecha"], on: true },
   { id: "term_e", grupo: "ESTRUCTURAS", nombre: "Estructuras OICI (terminadas)", tipo: "estructura",
     cats: ["sinrecep", "provisoria", "recibida"], on: false },
   { id: "obras", grupo: "OBRAS", nombre: "Obras", tipo: "obra",
@@ -83,7 +84,7 @@ const conProvisoria = (o) => codRecepcion(o) === "RP";
 function categoriaRecepcion(o) {
   if (conDefinitiva(o)) return null;
   const d = o.dias_para_recepcion;
-  if (d == null) return null; // sin fecha de fin no se puede calcular: solo queda en Terminadas
+  if (d == null) return "sinfecha"; // sin fecha de fin no se puede calcular el vencimiento
   return d < 0 ? "vencida" : d < 90 ? "r3" : d < 180 ? "r6" : "plazo";
 }
 function categoriaTerminada(o) {
@@ -896,7 +897,7 @@ const CAPAS_LISTA = [
   { id: "obras", nombre: "Obras", tipo: "obra" },
   { id: "relev", nombre: "Relevamiento", tipo: "relevamiento" },
 ];
-const ORDEN_CAT = ["infra", "montaje", "hormigonado", "aprobado_e", "aprobado_o", "proyecto", "vencida", "r3", "r6", "plazo", "sinrecep", "provisoria", "recibida", "terminada"];
+const ORDEN_CAT = ["infra", "montaje", "hormigonado", "aprobado_e", "aprobado_o", "proyecto", "vencida", "r3", "r6", "plazo", "sinfecha", "sinrecep", "provisoria", "recibida", "terminada"];
 const porCodigo = (a, b) => String(a.o.codigo ?? "").localeCompare(String(b.o.codigo ?? ""), "es", { numeric: true });
 
 // Elementos de una capa. Con "respetar", solo lo que dejan ver los filtros y las categorías tildadas.
@@ -1331,7 +1332,7 @@ function pintarReferencias() {
       ${c("proyecto")}${c("aprobado_e")}${c("hormigonado")}${c("montaje")}${c("infra")}</ul>
       <p class="nota" style="margin:8px 0 0">La etapa dice lo que se está haciendo; los hitos, lo que ya se terminó. En la capa Obras solo hay En proyecto, Proyecto aprobado y En infraestructura.</p></section>
     <section class="ajustes-bloque"><h3>Recepciones: terminadas sin recepción definitiva (borde amarillo)</h3><ul class="leyenda">
-      ${c("plazo")}${c("r6")}${c("r3")}${c("vencida")}</ul></section>
+      ${c("plazo")}${c("r6")}${c("r3")}${c("vencida")}${c("sinfecha")}</ul></section>
     <section class="ajustes-bloque"><h3>Terminadas: todas con fin de obra (borde oscuro)</h3><ul class="leyenda">
       ${c("sinrecep")}${c("provisoria")}${c("recibida")}</ul>
       <p class="nota" style="margin:8px 0 0">Una terminada sin recepción definitiva está en las dos capas; si las dos están prendidas, se ve con el símbolo de Recepciones.</p></section>
@@ -1642,7 +1643,7 @@ function cerrarFicha() {
 function pintarFicha(tipo, o, hitos, notas) {
   const cat = categoria(tipo, o), c = CAT[cat];
   const pasos = ESCALERA[tipo];
-  const clave = ["r6", "r3", "vencida", "plazo", "sinrecep", "provisoria"].includes(cat) ? "recepcion" : cat === "terminada" ? "terminada" : cat;
+  const clave = ["r6", "r3", "vencida", "plazo", "sinfecha", "sinrecep", "provisoria"].includes(cat) ? "recepcion" : cat === "terminada" ? "terminada" : cat;
   const pos = Math.max(0, pasos.indexOf(clave));
   const hechas = new Set((hitos || []).filter((h) => h.estado === "HECHO" && h.etapa).map((h) => h.etapa));
   const tramos = pasos.map((p, i) => {
