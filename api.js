@@ -258,7 +258,7 @@ function crearDemo() {
       await espera();
       const campo = { ESTRUCTURA: "estructura", "LICITACIÓN": "licitacion", "AÑO": "anio", "D.O.": "director_obra",
         "FECHA INICIO": "fecha_inicio", "FECHA FIN": "fecha_fin", "RECEPCIÓN": "recepcion", PLANOS: "planos",
-        OBSERVACIONES: "observaciones", Sala: "sala", Localidad: "localidad", Departamento: "departamento",
+        OBSERVACIONES: "observaciones", "FIN PREVISTO": "fin_previsto", Sala: "sala", Localidad: "localidad", Departamento: "departamento",
         "Licitación": "licitacion", Tarea: "tarea", "Descripción": "descripcion", Planos: "planos", ESTADO: "estado", Estado: "estado" };
       const o = lista(t).find((x) => x.id === id);
       for (const [k, v] of Object.entries(cambios)) o[campo[k]] = v;

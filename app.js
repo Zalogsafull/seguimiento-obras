@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-21";
+import { crearApi } from "./api.js?v=2026-11-20-22";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -91,6 +91,11 @@ function categoria(tipo, o) {
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const hoy = () => new Date().toISOString().slice(0, 10);
+// fecha de hoy en la hora de Uruguay (para comparar con fechas sin hora)
+const hoyLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+// Fin previsto ya pasado y la obra sin terminar
+const atrasada = (o) => !!o.fin_previsto && o.estado !== "FIN" && String(o.fin_previsto).slice(0, 10) < hoyLocal();
+const diasAtraso = (o) => Math.round((new Date(hoyLocal()) - new Date(String(o.fin_previsto).slice(0, 10))) / 864e5);
 const fecha = (iso) => (iso ? new Date(iso + "T12:00:00").toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—");
 const normal = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
@@ -578,6 +583,7 @@ const CAMPOS_EDITABLES = {
     ["FECHA FIN", "fecha_fin", "Fin", "fecha"],
     ["RECEPCIÓN", "recepcion", "Recepción", "recepcion"],
     ["PLANOS", "planos", "Planos (enlace a la carpeta)", "url"],
+    ["FIN PREVISTO", "fin_previsto", "Fin previsto", "fecha"],
     ["OBSERVACIONES", "observaciones", "Observaciones", "largo"],
   ],
   obra: [
@@ -589,6 +595,7 @@ const CAMPOS_EDITABLES = {
     ["Descripción", "descripcion", "Tipo", "descripcion"],
     ["D.O.", "director_obra", "Director de obra", "do"],
     ["Planos", "planos", "Planos (enlace a la carpeta)", "url"],
+    ["FIN PREVISTO", "fin_previsto", "Fin previsto", "fecha"],
   ],
 };
 
@@ -935,9 +942,10 @@ function armadoInforme(id) {
     cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin", "Recepción", "Hitos hechos"],
     fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), fecha(o.fecha_fin), o.recepcion, hitosTxt(o)] };
   return { ...porEtapa,
-    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Hitos hechos", "Observaciones"],
-    fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), hitosTxt(o), o.observaciones],
-    anchos: { 8: { cellWidth: 70 } } };
+    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin previsto", "Hitos hechos", "Observaciones"],
+    fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio),
+      o.fin_previsto ? fecha(o.fin_previsto) + (atrasada(o) ? " (pasado)" : "") : "", hitosTxt(o), o.observaciones],
+    anchos: { 9: { cellWidth: 62 } } };
 }
 
 async function hacerInforme(boton) {
@@ -1020,10 +1028,10 @@ const COLUMNAS_TABLA = {
   estructura: [["codigo", "Código"], ["etapa_nombre", "Etapa"], ["estado", "Situación", "estado"], ["estructura", "Estructura"],
     ["licitacion", "Licitación"], ["anio", "Año"], ["director_obra", "D.O."], ["fecha_inicio", "Inicio", "fecha"], ["fecha_fin", "Fin", "fecha"],
     ["recepcion", "Recepción"], ["vence_recepcion", "Vence recepción", "fecha"], ["dias_para_recepcion", "Días a recepción", "num"],
-    ["hitos", "Hitos hechos"], ["planos", "Planos"], ["observaciones", "Observaciones"]],
+    ["fin_previsto", "Fin previsto", "fecha"], ["hitos", "Hitos hechos"], ["planos", "Planos"], ["observaciones", "Observaciones"]],
   obra: [["codigo", "Código"], ["etapa_nombre", "Etapa"], ["estado", "Situación", "estado"], ["sala", "Sala"], ["localidad", "Localidad"],
     ["departamento", "Departamento"], ["licitacion", "Licitación"], ["tarea", "Tarea"], ["descripcion", "Tipo"], ["director_obra", "D.O."],
-    ["hitos", "Hitos hechos"], ["planos", "Planos"]],
+    ["fin_previsto", "Fin previsto", "fecha"], ["hitos", "Hitos hechos"], ["planos", "Planos"]],
   relevamiento: [["codigo", "Código"], ["descripcion", "Descripción"], ["lat", "Latitud", "num"], ["lon", "Longitud", "num"], ["z", "Z (m)", "num"]],
 };
 const SITUACIONES = [["PROY", "Proyecto"], ["CONS", "En obra"], ["FIN", "Terminada"]];
@@ -1290,6 +1298,8 @@ function pintarReferencias() {
       ${c("r6")}${c("r3")}${c("vencida")}</ul></section>
     <section class="ajustes-bloque"><h3>Terminadas (borde oscuro)</h3><ul class="leyenda">
       ${c("plazo")}${c("recibida")}</ul></section>
+    <section class="ajustes-bloque"><h3>Atraso</h3><ul class="leyenda">
+      <li><span class="mk-demo">${simbolo("estructura", { estructura: "MONOPOLO" }, "montaje", 0.95)}<i class="atraso"></i></span><span>Punto rojo: pasó la fecha prevista de finalización y no está terminada</span></li></ul></section>
     <section class="ajustes-bloque"><h3>Capas de utilidad</h3><ul class="leyenda">
       <li>${svgRelev(11)}<span>Relevamiento</span></li><li>${linea}<span>Límites de departamentos</span></li></ul></section>`;
 }
@@ -1395,7 +1405,7 @@ function filaHtml({ tipo, o, cat }, eti = "") {
   return `<li class="fila" tabindex="0" data-tipo="${tipo}" data-id="${o.id}" aria-current="${actual}">
     <span class="sim">${simbolo(tipo, o, cat, 0.95)}</span>
     <span class="cod">${esc(o.codigo)}</span>
-    <span class="eti">${eti || esc(c.nombre)}</span>
+    <span class="eti">${eti || esc(c.nombre)}${atrasada(o) ? ` <span class="atraso-txt">atrasada</span>` : ""}</span>
     <span class="sub">${esc(sub) || (tipo === "obra" ? "Obra" : "Estructura")}</span></li>`;
 }
 
@@ -1494,7 +1504,7 @@ function icono(tipo, o, cat) {
   const px = grande ? 18 : 13;
   return L.divIcon({
     className: `mk${activo ? " activo" : ""}`,
-    html: `${simbolo(tipo, o, cat)}<span style="left:${px + 3}px">${esc(o.codigo)}</span>`,
+    html: `${simbolo(tipo, o, cat)}${atrasada(o) ? `<i class="atraso" title="Fin previsto pasado"></i>` : ""}<span style="left:${px + 3}px">${esc(o.codigo)}</span>`,
     iconSize: [px, px], iconAnchor: [px / 2, px / 2],
   });
 }
@@ -1613,9 +1623,9 @@ function pintarFicha(tipo, o, hitos, notas) {
   const datos = tipo === "estructura"
     ? [["Estructura", o.estructura], ["Licitación", o.licitacion], ["Año", o.anio], ["Director de obra", o.director_obra],
        ["Inicio", fecha(o.fecha_inicio)], ["Fin", fecha(o.fecha_fin)], ["Recepción", o.recepcion || "—"],
-       ["Observaciones", o.observaciones]]
+       ["Fin previsto", fecha(o.fin_previsto)], ["Observaciones", o.observaciones]]
     : [["Sala", o.sala], ["Localidad", o.localidad], ["Departamento", o.departamento], ["Licitación", o.licitacion],
-       ["Tarea", o.tarea], ["Descripción", o.descripcion], ["Director de obra", o.director_obra]];
+       ["Tarea", o.tarea], ["Descripción", o.descripcion], ["Director de obra", o.director_obra], ["Fin previsto", fecha(o.fin_previsto)]];
   const boton = atajo;
   const enlaces = `<div class="atajos">
       ${boton(o.planos, "planos", "Planos")}
@@ -1640,7 +1650,8 @@ function pintarFicha(tipo, o, hitos, notas) {
     <div class="ficha-bloque">
       <h2>Hitos</h2>
       ${hitos == null ? `<p class="nota">Sin conexión: los hitos se ven cuando vuelva la señal.</p>`
-        : hitos.length ? hitos.map((h) => hitoHtml(h)).join("") : `<p class="nota">Esta obra no tiene hitos cargados.</p>`}
+        : hitos.length ? hitos.map((h) => hitoHtml(h) + (h.etapa === 2 && h.estado === "HECHO" ? finPrevistoHtml(o) : "")).join("")
+        : `<p class="nota">Esta obra no tiene hitos cargados.</p>`}
       ${editor() ? "" : `<p class="nota">Tu usuario es de solo lectura.</p>`}
     </div>
 
@@ -1679,6 +1690,14 @@ function pintarFicha(tipo, o, hitos, notas) {
       await abrirFicha(tipo, o.id);
     } catch (e) { aviso(e.message, true); b.disabled = false; }
   };
+  const fp = $("#fin-previsto", ficha);
+  if (fp) fp.onchange = async () => {
+    try {
+      await S.api.guardarDatos(tipo, o.id, { "FIN PREVISTO": fp.value || null });
+      aviso(fp.value ? `Fin previsto: ${fecha(fp.value)}` : "Fin previsto borrado");
+      await abrirFicha(tipo, o.id);
+    } catch (e) { aviso(e.message, true); }
+  };
   const ed = $("#editar-datos", ficha);
   if (ed) ed.onclick = () => editarDatos(tipo, o);
   const ce = $("#cambiar-estado", ficha);
@@ -1689,6 +1708,19 @@ function pintarFicha(tipo, o, hitos, notas) {
       await abrirFicha(tipo, o.id);
     } catch (e) { aviso(e.message, true); }
   };
+}
+
+// Debajo del hito de proyecto aprobado: fecha prevista de finalización (se puede cambiar cuando sea)
+function finPrevistoHtml(o) {
+  const tarde = atrasada(o);
+  const estado = !o.fin_previsto ? "Sin fecha prevista"
+    : o.estado === "FIN" ? "Obra terminada"
+    : tarde ? `Pasada hace ${diasAtraso(o)} día${diasAtraso(o) === 1 ? "" : "s"}`
+    : `Faltan ${-diasAtraso(o)} días`;
+  return `<div class="fin-previsto${tarde ? " tarde" : ""}">
+    <label for="fin-previsto">Fin previsto</label>
+    ${editor() ? `<input type="date" id="fin-previsto" value="${esc(String(o.fin_previsto || "").slice(0, 10))}">` : `<b>${fecha(o.fin_previsto)}</b>`}
+    <span>${estado}</span></div>`;
 }
 
 function hitoHtml(h) {

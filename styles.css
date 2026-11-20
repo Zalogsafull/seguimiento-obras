@@ -414,3 +414,13 @@ body.con-tabla .mapa-zona { display: none; }
 .tabla-datos a { color: var(--acento); }
 .tabla-ayuda { margin: 0; padding: 6px 14px; border-top: 1px solid var(--linea-suave); }
 @media (max-width: 760px) { .solo-compu { display: none !important; } }
+
+/* Fin previsto pasado */
+.mk .atraso, .mk-demo .atraso { position: absolute; top: -4px; right: -4px; width: 7px; height: 7px; border-radius: 50%; background: #FF5A4F; box-shadow: 0 0 0 1.5px #161616; pointer-events: none; }
+.mk-demo { position: relative; display: inline-flex; flex: none; }
+.atraso-txt { margin-left: 4px; padding: 0 5px; border-radius: 4px; background: rgba(255,90,79,.16); color: #FF8A80; font-size: 11px; font-weight: 600; }
+.fin-previsto { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: -2px 0 6px 30px; padding: 6px 10px; border-left: 2px solid var(--linea); font-size: 13px; color: var(--tinta-suave); }
+.fin-previsto label { color: var(--tinta); font-weight: 500; }
+.fin-previsto input { padding: 4px 6px; border: 1px solid var(--linea); border-radius: 6px; background: var(--campo); color: var(--tinta); font-size: 13px; }
+.fin-previsto.tarde { border-left-color: #FF5A4F; }
+.fin-previsto.tarde span { color: #FF8A80; font-weight: 600; }
