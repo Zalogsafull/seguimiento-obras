@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-20";
+import { crearApi } from "./api.js?v=2026-11-20-21";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -411,8 +411,8 @@ function mostrarApp() {
   $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
   $("#estado-datos").onclick = () => { if (S.estadoRed === "sinred") actualizar(); };
   $("#actualizar-ahora").onclick = async () => { await actualizar(); pintarAjustes(); };
-  $("#inf-curso").onclick = (ev) => hacerInforme("curso", ev.currentTarget);
-  $("#inf-recepciones").onclick = (ev) => hacerInforme("recepciones", ev.currentTarget);
+  $("#inf-pdf").onclick = (ev) => hacerInforme(ev.currentTarget);
+  $("#abrir-tabla").onclick = abrirTabla;
   prepararMapa();
   prepararPanel();
   const v = leerJSON(CLAVE_VISTA);
@@ -510,6 +510,7 @@ async function cargar() {
   cargarSolicitudes();
   pintar();
   if (UI.modo === "ajustes" && !UI.plegado) pintarAjustes();
+  if (!$("#tabla").hidden && !document.querySelector("#tabla .editando")) pintarTabla();
 }
 
 // ------------------------------------------------------------ pestañas
@@ -846,6 +847,33 @@ function pintarSolicitudes() {
   cont.querySelectorAll("[data-no]").forEach((b) => (b.onclick = () => resolverPedido(Number(b.dataset.no), false, nombreDe(por(b.dataset.no)), false)));
 }
 
+// ------------------------------------------------------------ capas para informes y tabla
+// Cada "capa" de esta lista sale de las mismas categorías que el árbol de Capas.
+const CAPAS_LISTA = [
+  { id: "est_todas", nombre: "Estructuras OICI (todas)", tipo: "estructura" },
+  { id: "obra_e", nombre: "Estructuras OICI Obra", tipo: "estructura" },
+  { id: "recep", nombre: "Estructuras OICI Recepciones", tipo: "estructura" },
+  { id: "term_e", nombre: "Estructuras OICI (terminadas)", tipo: "estructura" },
+  { id: "obras", nombre: "Obras", tipo: "obra" },
+  { id: "relev", nombre: "Relevamiento", tipo: "relevamiento" },
+];
+const ORDEN_CAT = ["infra", "montaje", "hormigonado", "aprobado_e", "aprobado_o", "proyecto", "vencida", "r3", "r6", "plazo", "sinfecha", "recibida", "terminada"];
+const porCodigo = (a, b) => String(a.o.codigo ?? "").localeCompare(String(b.o.codigo ?? ""), "es", { numeric: true });
+
+// Elementos de una capa. Con "respetar", solo lo que dejan ver los filtros y las categorías tildadas.
+function filasDeCapa(id, respetar) {
+  if (id === "relev") {
+    return (respetar ? relevFiltrados() : S.datos.relev).map((o) => ({ tipo: "relevamiento", o, cat: null }));
+  }
+  return todas().filter((x) => {
+    if (id === "est_todas") { if (x.tipo !== "estructura") return false; }
+    else if (!x.capa || x.capa.id !== id) return false;
+    if (!respetar) return true;
+    return pasaFiltros(x.tipo, x.o) && (!x.capa || S.catOn[`${x.capa.id}:${x.cat}`] !== false);
+  });
+}
+const opcionesCapas = (sel) => CAPAS_LISTA.map((c) => `<option value="${c.id}" ${c.id === sel ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
+
 // ------------------------------------------------------------ informes en PDF (A4 apaisado, las hojas que hagan falta)
 const cargarScript = (src) => new Promise((ok, no) => {
   if (document.querySelector(`script[src="${src}"]`)) return ok();
@@ -874,115 +902,111 @@ function simboloPDF(doc, f, x, y, r, color, borde) {
   } else doc.circle(x, y, r, "FD");
 }
 
-async function hacerInforme(clase, boton) {
+const hitosTxt = (o) => (o.hitos_total ? `${o.hitos_hechos ?? 0} de ${o.hitos_total}` : "—");
+const situacionRecepcion = (o) => {
+  const d = o.dias_para_recepcion;
+  return d == null ? "—" : d < 0 ? `vencida hace ${-d} días` : d === 0 ? "vence hoy" : `faltan ${d} días`;
+};
+const grupoRecepcion = (x) => {
+  if (x.cat === "recibida") return "Recibidas (recepción definitiva hecha)";
+  const d = x.o.dias_para_recepcion;
+  return d == null ? "Sin fecha de fin (no se puede calcular el vencimiento)" : d < 0 ? "Vencidas"
+    : d < 90 ? "Vencen en menos de 3 meses" : d < 180 ? "Vencen en 3 a 6 meses" : "Vencen en más de 6 meses";
+};
+const diasOrden = (x) => (x.cat === "recibida" ? 1e9 : x.o.dias_para_recepcion == null ? 1e8 : x.o.dias_para_recepcion);
+
+// Qué columnas, grupos y orden lleva el informe de cada capa
+function armadoInforme(id) {
+  const porEtapa = { grupo: (x) => CAT[x.cat].nombre, ordenar: (a, b) => ORDEN_CAT.indexOf(a.cat) - ORDEN_CAT.indexOf(b.cat) || porCodigo(a, b) };
+  const porVencimiento = { grupo: grupoRecepcion, ordenar: (a, b) => diasOrden(a) - diasOrden(b) || porCodigo(a, b) };
+  if (id === "relev") return { simbolo: false, grupo: () => null, ordenar: porCodigo,
+    cols: ["Código", "Descripción", "Latitud", "Longitud", "Z (m)"],
+    fila: (o) => [o.codigo, o.descripcion, Number(o.lat).toFixed(6), Number(o.lon).toFixed(6), o.z == null || o.z === "" ? "—" : numero(o.z, 2)],
+    anchos: { 1: { cellWidth: 110 } } };
+  if (id === "obras") return { ...porEtapa,
+    cols: ["Código", "Sala", "Localidad", "Departamento", "Licitación", "Tarea", "D.O.", "Hitos hechos"],
+    fila: (o) => [o.codigo, o.sala, o.localidad, o.departamento, o.licitacion, o.tarea, o.director_obra, hitosTxt(o)] };
+  if (id === "recep" || id === "term_e") return { ...porVencimiento,
+    cols: ["Código", "Estructura", "Licitación", "D.O.", "Fin de obra", "Vence la recepción", "Situación", "Recepción hecha"],
+    fila: (o) => [o.codigo, o.estructura, o.licitacion, o.director_obra, fecha(o.fecha_fin), fecha(o.vence_recepcion), situacionRecepcion(o),
+      o.recepcion === "RD" ? "Definitiva" : o.recepcion === "RP" ? "Provisoria" : "Ninguna"],
+    anchos: { 7: { fontStyle: "bold" } } };
+  if (id === "est_todas") return { ...porEtapa,
+    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin", "Recepción", "Hitos hechos"],
+    fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), fecha(o.fecha_fin), o.recepcion, hitosTxt(o)] };
+  return { ...porEtapa,
+    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Hitos hechos", "Observaciones"],
+    fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), hitosTxt(o), o.observaciones],
+    anchos: { 8: { cellWidth: 70 } } };
+}
+
+async function hacerInforme(boton) {
   const original = boton.textContent;
   boton.disabled = true; boton.textContent = "Armando el PDF…";
   try {
     const JsPDF = await prepararPDF();
-    const conFiltros = $("#inf-filtros").checked && filtrosActivos() > 0;
-    const base = todas().filter((x) => !conFiltros || pasaFiltros(x.tipo, x.o));
+    const id = $("#inf-capa").value, capa = CAPAS_LISTA.find((c) => c.id === id);
+    const respetar = $("#inf-filtros").checked;
+    const a = armadoInforme(id);
+    const xs = filasDeCapa(id, respetar).sort(a.ordenar);
+    const conSimbolo = a.simbolo !== false;
+    const cols = conSimbolo ? ["", ...a.cols] : a.cols;
+    const anchos = {};
+    for (const [k, v] of Object.entries(a.anchos || {})) anchos[conSimbolo ? Number(k) : Number(k) - 1] = v;
     const doc = new JsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
-    let titulo, archivo, bloques;
-
-    if (clase === "curso") {
-      titulo = "Obras en curso y en proyecto";
-      archivo = "obras-en-curso";
-      const orden = ["infra", "montaje", "hormigonado", "aprobado_e", "aprobado_o", "proyecto"];
-      const ordenar = (a, b) => orden.indexOf(a.cat) - orden.indexOf(b.cat) || String(a.o.codigo).localeCompare(String(b.o.codigo), "es", { numeric: true });
-      const hitos = (o) => (o.hitos_total ? `${o.hitos_hechos ?? 0} de ${o.hitos_total}` : "—");
-      bloques = [
-        { nombre: "Estructuras", xs: base.filter((x) => x.tipo === "estructura" && orden.includes(x.cat)).sort(ordenar),
-          grupo: (x) => CAT[x.cat].nombre,
-          cols: ["", "Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Hitos hechos", "Observaciones"],
-          fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), hitos(o), o.observaciones],
-          anchos: { 8: { cellWidth: 70 } } },
-        { nombre: "Obras", xs: base.filter((x) => x.tipo === "obra" && orden.includes(x.cat)).sort(ordenar),
-          grupo: (x) => CAT[x.cat].nombre,
-          cols: ["", "Código", "Sala", "Localidad", "Departamento", "Licitación", "Tarea", "D.O.", "Hitos hechos"],
-          fila: (o) => [o.codigo, o.sala, o.localidad, o.departamento, o.licitacion, o.tarea, o.director_obra, hitos(o)] },
-      ];
-    } else {
-      titulo = "Recepciones pendientes";
-      archivo = "recepciones-pendientes";
-      const cats = ["vencida", "r3", "r6", "plazo", "sinfecha"];
-      const dias = (o) => (o.dias_para_recepcion == null ? Infinity : o.dias_para_recepcion);
-      const grupo = (x) => {
-        const d = x.o.dias_para_recepcion;
-        return d == null ? "Sin fecha de fin (no se puede calcular el vencimiento)" : d < 0 ? "Vencidas"
-          : d < 90 ? "Vencen en menos de 3 meses" : d < 180 ? "Vencen en 3 a 6 meses" : "Vencen en más de 6 meses";
-      };
-      const sit = (o) => {
-        const d = o.dias_para_recepcion;
-        return d == null ? "—" : d < 0 ? `vencida hace ${-d} días` : d === 0 ? "vence hoy" : `faltan ${d} días`;
-      };
-      bloques = [{ nombre: "Estructuras terminadas sin recepción definitiva",
-        xs: base.filter((x) => x.tipo === "estructura" && cats.includes(x.cat))
-          .sort((a, b) => dias(a.o) - dias(b.o) || String(a.o.codigo).localeCompare(String(b.o.codigo), "es", { numeric: true })),
-        grupo,
-        cols: ["", "Código", "Estructura", "Licitación", "D.O.", "Fin de obra", "Vence la recepción", "Situación", "Recepción hecha"],
-        fila: (o) => [o.codigo, o.estructura, o.licitacion, o.director_obra, fecha(o.fecha_fin), fecha(o.vence_recepcion), sit(o),
-          o.recepcion === "RP" ? "Provisoria" : "Ninguna"],
-        anchos: { 7: { fontStyle: "bold" } } }];
-    }
-
-    const total = bloques.reduce((n, b) => n + b.xs.length, 0);
-    const pie = `${conFiltros ? "Con los filtros activos de la web" : "Todas las estructuras y obras"} · datos ${S.datosDe ? cuandoTexto(S.datosDe) : "de hoy"}`;
+    const pie = `${respetar ? "Con los filtros y las categorías tildadas en la web" : "Todos los elementos de la capa"} · datos ${S.datosDe ? cuandoTexto(S.datosDe) : "de hoy"}`;
     const cabeza = () => {
       doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(30);
-      doc.text(titulo, 12, 14);
+      doc.text(capa.nombre, 12, 14);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(90);
       doc.text(`Seguimiento de obras OICI · ${fecha(hoy())}`, W - 12, 14, { align: "right" });
       doc.text(pie, 12, 19.5);
     };
-    let y = 25;
     cabeza();
-    if (!total) {
+    if (!xs.length) {
       doc.setFontSize(11); doc.setTextColor(60);
-      doc.text("No hay nada para listar" + (conFiltros ? " con los filtros activos." : "."), 12, 32);
-    }
-    for (const b of bloques) {
-      if (!b.xs.length) continue;
+      doc.text("No hay nada para listar" + (respetar ? " con los filtros y categorías elegidos." : " en esta capa."), 12, 32);
+    } else {
       const body = [], meta = [];
-      let actual = null;
-      for (const x of b.xs) {
-        const g = b.grupo(x);
-        if (g !== actual) {
+      let actual;
+      for (const x of xs) {
+        const g = a.grupo(x);
+        if (g && g !== actual) {
           actual = g;
-          const n = b.xs.filter((z) => b.grupo(z) === g).length;
-          body.push([{ content: `${g}  (${n})`, colSpan: b.cols.length, styles: { fillColor: [236, 238, 240], fontStyle: "bold", textColor: 30 } }]);
+          const n = xs.filter((z) => a.grupo(z) === g).length;
+          body.push([{ content: `${g}  (${n})`, colSpan: cols.length, styles: { fillColor: [236, 238, 240], fontStyle: "bold", textColor: 30 } }]);
           meta.push(null);
         }
-        body.push(["", ...b.fila(x.o).map(txt)]);
-        const f = forma(x.tipo, x.o), c = CAT[x.cat];
-        meta.push({ f, color: c.color, borde: c.recepcion ? "#e0c200" : "#555555" });
+        body.push([...(conSimbolo ? [""] : []), ...a.fila(x.o).map(txt)]);
+        meta.push(conSimbolo ? { f: forma(x.tipo, x.o), color: CAT[x.cat].color, borde: CAT[x.cat].recepcion ? "#e0c200" : "#555555" } : null);
       }
       doc.autoTable({
-        startY: y,
-        head: [[{ content: `${b.nombre}  (${b.xs.length})`, colSpan: b.cols.length, styles: { halign: "left", fontSize: 11, fillColor: [44, 44, 44] } }], b.cols],
+        startY: 25,
+        head: [cols],
         body,
         theme: "grid",
         margin: { top: 25, left: 12, right: 12, bottom: 14 },
         styles: { font: "helvetica", fontSize: 8.5, cellPadding: 1.6, lineColor: [210, 210, 210], lineWidth: 0.15, textColor: 40, overflow: "linebreak" },
-        headStyles: { fillColor: [70, 70, 70], textColor: 255, fontStyle: "bold" },
-        columnStyles: { 0: { cellWidth: 7 }, 1: { fontStyle: "bold" }, ...(b.anchos || {}) },
+        headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: "bold" },
+        columnStyles: { ...(conSimbolo ? { 0: { cellWidth: 7 }, 1: { fontStyle: "bold" } } : { 0: { fontStyle: "bold" } }), ...anchos },
         rowPageBreak: "avoid",
         didDrawCell: (d) => {
-          const m = d.section === "body" && d.column.index === 0 ? meta[d.row.index] : null;
+          const m = conSimbolo && d.section === "body" && d.column.index === 0 ? meta[d.row.index] : null;
           if (m) simboloPDF(doc, m.f, d.cell.x + d.cell.width / 2, d.cell.y + d.cell.height / 2, 1.7, m.color, m.borde);
         },
         didDrawPage: () => cabeza(),
       });
-      y = doc.lastAutoTable.finalY + 8;
     }
     const n = doc.getNumberOfPages();
     for (let i = 1; i <= n; i++) {
       doc.setPage(i); doc.setFontSize(8); doc.setTextColor(120);
       doc.text(`Hoja ${i} de ${n}`, W - 12, H - 7, { align: "right" });
-      doc.text(`${total} en total`, 12, H - 7);
+      doc.text(`${xs.length} en total`, 12, H - 7);
     }
-    doc.save(`${archivo}-${hoy()}.pdf`);
-    aviso("PDF listo: se descargó " + `${archivo}-${hoy()}.pdf`);
+    const archivo = `${capa.nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${hoy()}.pdf`;
+    doc.save(archivo);
+    aviso("PDF listo: se descargó " + archivo);
   } catch (e) {
     aviso("No se pudo armar el PDF: " + e.message, true);
   } finally {
@@ -990,13 +1014,249 @@ async function hacerInforme(clase, boton) {
   }
 }
 
+// ------------------------------------------------------------ tabla de atributos (en la computadora, como en QGIS)
+// [campo de la web, título, tipo] — "editable" dice qué columna de la capa cambia
+const COLUMNAS_TABLA = {
+  estructura: [["codigo", "Código"], ["etapa_nombre", "Etapa"], ["estado", "Situación", "estado"], ["estructura", "Estructura"],
+    ["licitacion", "Licitación"], ["anio", "Año"], ["director_obra", "D.O."], ["fecha_inicio", "Inicio", "fecha"], ["fecha_fin", "Fin", "fecha"],
+    ["recepcion", "Recepción"], ["vence_recepcion", "Vence recepción", "fecha"], ["dias_para_recepcion", "Días a recepción", "num"],
+    ["hitos", "Hitos hechos"], ["planos", "Planos"], ["observaciones", "Observaciones"]],
+  obra: [["codigo", "Código"], ["etapa_nombre", "Etapa"], ["estado", "Situación", "estado"], ["sala", "Sala"], ["localidad", "Localidad"],
+    ["departamento", "Departamento"], ["licitacion", "Licitación"], ["tarea", "Tarea"], ["descripcion", "Tipo"], ["director_obra", "D.O."],
+    ["hitos", "Hitos hechos"], ["planos", "Planos"]],
+  relevamiento: [["codigo", "Código"], ["descripcion", "Descripción"], ["lat", "Latitud", "num"], ["lon", "Longitud", "num"], ["z", "Z (m)", "num"]],
+};
+const SITUACIONES = [["PROY", "Proyecto"], ["CONS", "En obra"], ["FIN", "Terminada"]];
+// columna editable de la capa para cada campo de la web
+function columnaEditable(tipo, k) {
+  if (k === "estado") return tipo === "estructura" ? ["ESTADO", "estado"] : tipo === "obra" ? ["Estado", "estado"] : null;
+  const c = (CAMPOS_EDITABLES[tipo] || []).find((x) => x[1] === k);
+  return c ? [c[0], c[3]] : null;
+}
+const T = { capa: "est_todas", texto: "", respetar: false, orden: "codigo", desc: false, sel: new Set() };
+
+function valorTabla(x, k) {
+  const o = x.o;
+  if (k === "etapa_nombre") return x.cat ? CAT[x.cat].nombre : "";
+  if (k === "hitos") return o.hitos_total ? `${o.hitos_hechos ?? 0} de ${o.hitos_total}` : "";
+  if (k === "estado") return (SITUACIONES.find((s) => s[0] === o.estado) || [, o.estado ?? ""])[1];
+  return o[k] ?? "";
+}
+function mostrarTabla(x, k, tipoCol) {
+  const v = valorTabla(x, k);
+  if (v === "" || v == null) return "";
+  if (tipoCol === "fecha") return fecha(String(v).slice(0, 10));
+  if (k === "lat" || k === "lon") return Number(v).toFixed(6);
+  if (k === "planos") return `<a href="${esc(v)}" target="_blank" rel="noopener">abrir</a>`;
+  return esc(v);
+}
+
+function abrirTabla() {
+  if (MED.activo) terminarMedida();
+  $("#tabla").hidden = false;
+  document.body.classList.add("con-tabla");
+  pintarTabla();
+}
+function cerrarTabla() {
+  $("#tabla").hidden = true;
+  document.body.classList.remove("con-tabla");
+}
+
+function filasTabla() {
+  const t = normal(T.texto);
+  const tipo = CAPAS_LISTA.find((c) => c.id === T.capa).tipo;
+  const cols = COLUMNAS_TABLA[tipo];
+  let xs = filasDeCapa(T.capa, T.respetar);
+  if (t) xs = xs.filter((x) => cols.some(([k]) => normal(valorTabla(x, k)).includes(t)));
+  const num = (v) => (v === "" || v == null || isNaN(Number(v)) ? null : Number(v));
+  xs.sort((a, b) => {
+    const va = valorTabla(a, T.orden), vb = valorTabla(b, T.orden);
+    const na = num(va), nb = num(vb);
+    let r;
+    if (va === "" && vb !== "") r = 1;
+    else if (vb === "" && va !== "") r = -1;
+    else if (na != null && nb != null) r = na - nb;
+    else r = String(va).localeCompare(String(vb), "es", { numeric: true });
+    return T.desc ? -r : r;
+  });
+  return { xs, tipo, cols };
+}
+
+function pintarTabla() {
+  const caja = $("#tabla");
+  if (caja.hidden) return;
+  const { xs, tipo, cols } = filasTabla();
+  const ids = new Set(xs.map((x) => x.o.id));
+  for (const id of [...T.sel]) if (!ids.has(id)) T.sel.delete(id);
+  const puede = editor() && tipo !== "relevamiento";
+  const editables = puede ? cols.filter(([k]) => columnaEditable(tipo, k)) : [];
+  const todosSel = xs.length && xs.every((x) => T.sel.has(x.o.id));
+  const flecha = (k) => (T.orden === k ? (T.desc ? " ▾" : " ▴") : "");
+  caja.innerHTML = `
+    <div class="tabla-barra">
+      <h2>Tabla de atributos</h2>
+      <select id="t-capa" aria-label="Capa">${opcionesCapas(T.capa)}</select>
+      <input id="t-buscar" type="search" placeholder="Buscar en la tabla" value="${esc(T.texto)}" aria-label="Buscar">
+      <label class="t-check"><input type="checkbox" id="t-respetar" ${T.respetar ? "checked" : ""}> Respetar filtros y categorías</label>
+      <span class="t-cuenta">${xs.length} fila${xs.length === 1 ? "" : "s"}${T.sel.size ? ` · ${T.sel.size} elegida${T.sel.size === 1 ? "" : "s"}` : ""}</span>
+      <button class="boton boton-chico" type="button" id="t-csv">Exportar CSV</button>
+      <button class="cerrar" type="button" id="t-cerrar" aria-label="Cerrar la tabla" title="Cerrar la tabla">✕</button>
+    </div>
+    ${puede ? `<form class="tabla-masivo" id="t-masivo" ${T.sel.size ? "" : "hidden"}>
+      <b>Cambiar en ${T.sel.size} elegida${T.sel.size === 1 ? "" : "s"}:</b>
+      <select name="campo" aria-label="Campo">${editables.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select>
+      <span id="t-valor"></span>
+      <button class="boton boton-primario boton-chico" type="submit">Aplicar</button>
+      <span class="t-progreso" id="t-progreso"></span>
+    </form>` : ""}
+    <div class="tabla-scroll">
+      <table class="tabla-datos">
+        <thead><tr>
+          ${puede ? `<th class="t-sel"><input type="checkbox" id="t-todos" ${todosSel ? "checked" : ""} aria-label="Elegir todas"></th>` : ""}
+          <th class="t-sim"></th>
+          ${cols.map(([k, n]) => `<th data-orden="${k}" class="${columnaEditable(tipo, k) && puede ? "editable" : ""}">${n}${flecha(k)}</th>`).join("")}
+        </tr></thead>
+        <tbody>
+          ${xs.map((x) => `<tr data-id="${x.o.id}" class="${T.sel.has(x.o.id) ? "elegida" : ""}">
+            ${puede ? `<td class="t-sel"><input type="checkbox" ${T.sel.has(x.o.id) ? "checked" : ""} aria-label="Elegir ${esc(x.o.codigo)}"></td>` : ""}
+            <td class="t-sim">${x.cat ? simbolo(x.tipo, x.o, x.cat, 0.8) : svgRelev(9)}</td>
+            ${cols.map(([k, , tc]) => `<td data-k="${k}" class="${columnaEditable(tipo, k) && puede ? "editable" : ""}${tc === "num" ? " num" : ""}">${mostrarTabla(x, k, tc)}</td>`).join("")}
+          </tr>`).join("")}
+        </tbody>
+      </table>
+      ${xs.length ? "" : `<p class="nota" style="padding:16px">No hay filas${T.texto ? " con esa búsqueda" : ""}.</p>`}
+    </div>
+    <p class="tabla-ayuda nota">${puede ? "Doble clic en una celda con fondo claro para editarla. Doble clic en el código abre la ficha. Elegí filas para cambiar un campo en todas juntas." : "Doble clic en una fila abre la ficha."}</p>`;
+
+  $("#t-cerrar").onclick = cerrarTabla;
+  $("#t-capa").onchange = (ev) => { T.capa = ev.target.value; T.sel.clear(); T.orden = "codigo"; T.desc = false; pintarTabla(); };
+  const b = $("#t-buscar");
+  b.oninput = () => { T.texto = b.value; clearTimeout(T.timer); T.timer = setTimeout(() => { pintarTabla(); const nb = $("#t-buscar"); nb.focus(); nb.setSelectionRange(nb.value.length, nb.value.length); }, 250); };
+  $("#t-respetar").onchange = (ev) => { T.respetar = ev.target.checked; pintarTabla(); };
+  $("#t-csv").onclick = () => exportarCSV(xs, cols, tipo);
+  caja.querySelectorAll("th[data-orden]").forEach((th) => (th.onclick = () => {
+    const k = th.dataset.orden;
+    T.desc = T.orden === k ? !T.desc : false;
+    T.orden = k;
+    pintarTabla();
+  }));
+  const todos = $("#t-todos");
+  if (todos) todos.onchange = () => { xs.forEach((x) => (todos.checked ? T.sel.add(x.o.id) : T.sel.delete(x.o.id))); pintarTabla(); };
+  const tbody = caja.querySelector("tbody");
+  tbody.onchange = (ev) => {
+    const tr = ev.target.closest("tr");
+    if (!ev.target.matches(".t-sel input")) return;
+    const id = Number(tr.dataset.id);
+    ev.target.checked ? T.sel.add(id) : T.sel.delete(id);
+    pintarTabla();
+  };
+  tbody.ondblclick = (ev) => {
+    const td = ev.target.closest("td"), tr = ev.target.closest("tr");
+    if (!td || !tr || td.classList.contains("t-sel")) return;
+    const id = Number(tr.dataset.id), k = td.dataset.k;
+    const x = xs.find((z) => z.o.id === id);
+    if (td.classList.contains("editable") && k !== "codigo") return editarCelda(td, x, k, tipo);
+    if (tipo === "relevamiento") abrirRelev(id); else abrirFicha(tipo, id);
+  };
+  const m = $("#t-masivo");
+  if (m) {
+    const ponerValor = () => { $("#t-valor").innerHTML = controlValor(tipo, m.campo.value, ""); };
+    m.campo.onchange = ponerValor;
+    ponerValor();
+    m.onsubmit = (ev) => { ev.preventDefault(); aplicarMasivo(tipo, m.campo.value, leerControl($("#t-valor")), [...T.sel]); };
+  }
+}
+
+// Control para escribir un valor según el tipo de campo
+function controlValor(tipo, k, v) {
+  const [, clase] = columnaEditable(tipo, k) || [];
+  const val = esc(v ?? "");
+  if (clase === "estado") return `<select data-valor>${SITUACIONES.map(([c, n]) => `<option value="${c}" ${v === c ? "selected" : ""}>${n}</option>`).join("")}</select>`;
+  if (clase === "fecha") return `<input data-valor type="date" value="${esc(String(v ?? "").slice(0, 10))}">`;
+  if (clase === "anio") return `<input data-valor type="number" min="1990" max="2100" value="${val}" placeholder="Año">`;
+  if (clase === "recepcion") return `<select data-valor>${["", "RP", "RD"].map((c) => `<option value="${c}" ${v === c ? "selected" : ""}>${c || "(vacío)"}</option>`).join("")}</select>`;
+  if (clase === "estructura") return `<select data-valor>${["", ...LISTA_ESTRUCTURA].map((c) => `<option ${v === c ? "selected" : ""}>${c}</option>`).join("")}</select>`;
+  if (clase === "descripcion") return `<select data-valor>${["", "OBRA", "COSITIO"].map((c) => `<option ${v === c ? "selected" : ""}>${c}</option>`).join("")}</select>`;
+  return `<input data-valor value="${val}" placeholder="Vacío para borrar">`;
+}
+const leerControl = (cont) => {
+  const el = cont.querySelector("[data-valor]");
+  const v = el.value.trim();
+  return v === "" ? null : el.type === "number" ? Number(v) : v;
+};
+
+function editarCelda(td, x, k, tipo) {
+  if (td.querySelector("[data-valor]")) return;
+  const antes = td.innerHTML;
+  td.classList.add("editando");
+  td.innerHTML = controlValor(tipo, k, x.o[k]);
+  const el = td.querySelector("[data-valor]");
+  el.focus();
+  let listo = false;
+  const terminar = async (guardar) => {
+    if (listo) return;
+    listo = true;
+    if (!guardar) { td.classList.remove("editando"); td.innerHTML = antes; return; }
+    const v = leerControl(td);
+    const viejo = x.o[k] == null || x.o[k] === "" ? null : String(x.o[k]).slice(0, el.type === "date" ? 10 : undefined);
+    if (String(v ?? "") === String(viejo ?? "")) { td.classList.remove("editando"); td.innerHTML = antes; return; }
+    const [col] = columnaEditable(tipo, k);
+    td.innerHTML = '<span class="nota">Guardando…</span>';
+    try {
+      await S.api.guardarDatos(tipo, x.o.id, { [col]: v });
+      x.o[k] = v;
+      aviso("Guardado");
+      await cargar();
+    } catch (e) { aviso(e.message, true); }
+    pintarTabla();
+  };
+  el.onkeydown = (ev) => { if (ev.key === "Enter") terminar(true); if (ev.key === "Escape") terminar(false); };
+  el.onblur = () => terminar(true);
+  if (el.tagName === "SELECT") el.onchange = () => terminar(true);
+}
+
+async function aplicarMasivo(tipo, k, v, ids) {
+  const [col] = columnaEditable(tipo, k);
+  const nombre = COLUMNAS_TABLA[tipo].find((c) => c[0] === k)[1];
+  if (!ids.length) return;
+  if (!confirm(`¿Poner ${nombre} = ${v ?? "(vacío)"} en ${ids.length} elemento${ids.length === 1 ? "" : "s"}?`)) return;
+  const prog = $("#t-progreso"), boton = $("#t-masivo button[type=submit]");
+  boton.disabled = true;
+  let hechos = 0, errores = 0, ultimo = "";
+  const cola = [...ids];
+  const trabajar = async () => {
+    while (cola.length) {
+      const id = cola.shift();
+      try { await S.api.guardarDatos(tipo, id, { [col]: v }); hechos++; }
+      catch (e) { errores++; ultimo = e.message; }
+      prog.textContent = `${hechos + errores} de ${ids.length}…`;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, trabajar));
+  aviso(errores ? `Se cambiaron ${hechos}; fallaron ${errores}: ${ultimo}` : `${nombre} cambiado en ${hechos} elemento${hechos === 1 ? "" : "s"}`, errores > 0);
+  await cargar();
+  pintarTabla();
+}
+
+function exportarCSV(xs, cols, tipo) {
+  const celda = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lineas = [cols.map(([, n]) => celda(n)).join(";")];
+  for (const x of xs) lineas.push(cols.map(([k]) => celda(valorTabla(x, k))).join(";"));
+  const blob = new Blob(["﻿" + lineas.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${T.capa}-${hoy()}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
 // ------------------------------------------------------------ ajustes (cuenta, mapa y datos guardados)
 function pintarAjustes() {
   pintarSolicitudes();
-  const nf = filtrosActivos(), cf = $("#inf-filtros");
-  cf.disabled = !nf;
-  if (!nf) cf.checked = false;
-  $("#inf-filtros-texto").textContent = nf ? `Solo lo que dejan ver los filtros activos (${nf})` : "Solo lo que dejan ver los filtros (no hay filtros activos)";
+  const sc = $("#inf-capa");
+  if (!sc.options.length) sc.innerHTML = opcionesCapas("obra_e");
+  const nf = filtrosActivos();
+  $("#inf-filtros-texto").textContent = `Respetar los filtros${nf ? ` (${nf} activo${nf > 1 ? "s" : ""})` : ""} y las categorías tildadas en Capas`;
   const rol = editor() ? "Editor" : "Solo lectura";
   $("#cuenta-detalle").textContent = [S.usuario?.email, rol, S.perfil?.iniciales_do ? "D.O. " + S.perfil.iniciales_do : ""].filter(Boolean).join(" · ");
   const m = $("#ajustes-mapa");

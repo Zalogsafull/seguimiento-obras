@@ -382,5 +382,35 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .en-curso:hover { border-color: #6a6a6a; color: var(--tinta); }
 .en-curso[aria-pressed="true"] { border-style: solid; border-color: #3E9E4F; background: rgba(62,158,79,.18); color: #8FD99B; font-weight: 600; }
 
-.informes { display: grid; gap: 8px; }
-.informes .boton { width: 100%; text-align: left; }
+
+/* Tabla de atributos (computadora) */
+.tabla-vista { grid-column: 2; grid-row: 2; position: relative; z-index: 950; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--fondo); border-left: 1px solid var(--linea); }
+.tabla-vista[hidden] { display: none; }
+body.con-tabla .mapa-zona { display: none; }
+.tabla-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--linea); background: var(--superficie); }
+.tabla-barra h2 { margin: 0 6px 0 0; font: 600 17px/1.2 var(--cond); }
+.tabla-barra select, .tabla-barra input[type=search] { padding: 6px 8px; border: 1px solid var(--linea); border-radius: 6px; background: var(--campo); color: var(--tinta); font-size: 13px; }
+.tabla-barra input[type=search] { width: 200px; }
+.t-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--tinta-suave); }
+.t-cuenta { margin-left: auto; font-size: 13px; color: var(--tinta-suave); }
+.tabla-barra .cerrar { width: 32px; height: 32px; border: 1px solid var(--linea); border-radius: 6px; background: #383838; color: var(--tinta); cursor: pointer; }
+.tabla-masivo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; background: #233a3e; border-bottom: 1px solid #2f5358; font-size: 13px; }
+.tabla-masivo[hidden] { display: none; }
+.tabla-masivo select, .tabla-masivo input { padding: 5px 8px; border: 1px solid var(--linea); border-radius: 6px; background: var(--campo); color: var(--tinta); font-size: 13px; }
+.t-progreso { color: var(--tinta-suave); }
+.tabla-scroll { flex: 1; overflow: auto; min-height: 0; }
+.tabla-datos { border-collapse: separate; border-spacing: 0; font-size: 13px; min-width: 100%; }
+.tabla-datos th { position: sticky; top: 0; z-index: 1; padding: 7px 10px; background: #333; color: var(--tinta); text-align: left; font-weight: 600; white-space: nowrap; cursor: pointer; border-bottom: 1px solid var(--linea); user-select: none; }
+.tabla-datos th:hover { background: #3b3b3b; }
+.tabla-datos td { padding: 5px 10px; border-bottom: 1px solid var(--linea-suave); white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; color: var(--tinta); }
+.tabla-datos td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tabla-datos td.editable { background: rgba(108,196,209,.05); cursor: text; }
+.tabla-datos td.editando { padding: 2px 4px; overflow: visible; }
+.tabla-datos td.editando [data-valor] { width: 100%; min-width: 120px; padding: 4px 6px; border: 1px solid var(--acento); border-radius: 4px; background: var(--campo); color: var(--tinta); font-size: 13px; }
+.tabla-datos tbody tr:hover td { background: #2f2f2f; }
+.tabla-datos tr.elegida td { background: rgba(44,127,140,.28) !important; }
+.tabla-datos .t-sel, .tabla-datos .t-sim { width: 28px; text-align: center; padding-left: 8px; padding-right: 4px; cursor: default; }
+.tabla-datos td.t-sim svg { vertical-align: middle; }
+.tabla-datos a { color: var(--acento); }
+.tabla-ayuda { margin: 0; padding: 6px 14px; border-top: 1px solid var(--linea-suave); }
+@media (max-width: 760px) { .solo-compu { display: none !important; } }
