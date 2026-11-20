@@ -334,3 +334,26 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .lapiz { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: none; border: 1px solid var(--linea); border-radius: 8px; background: #383838; color: var(--acento); cursor: pointer; }
 .lapiz:hover { background: #444; border-color: #5A5A5A; }
 .form-datos { display: grid; gap: 10px; }
+
+/* Botón de mapa de fondo y su menú */
+.ctrl-base { position: relative; }
+.ctrl-base > a { display: flex !important; align-items: center; justify-content: center; }
+.ctrl-base.activo > a, .ctrl-base.activo > a:hover { background: var(--acento-fuerte) !important; color: #fff !important; }
+.menu-base { position: absolute; top: 0; right: calc(100% + 8px); width: 220px; padding: 10px 12px 12px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.5); color: var(--tinta); font: 14px/1.3 var(--texto); cursor: default; }
+.menu-base[hidden] { display: none; }
+.opcion-base { display: flex; align-items: center; gap: 10px; padding: 7px 6px; border-radius: 8px; cursor: pointer; }
+.opcion-base:has(input:checked) { background: var(--acento-claro); font-weight: 600; }
+.opcion-base input { position: absolute; opacity: 0; pointer-events: none; }
+.opcion-base:has(input:focus-visible) { outline: 2px solid var(--acento); }
+.muestra { width: 34px; height: 26px; flex: none; border-radius: 5px; border: 1px solid #5a5a5a; }
+.muestra-gris { background: linear-gradient(135deg, #212121 45%, #3a3a3a 46% 52%, #212121 53%); }
+.muestra-calles { background: linear-gradient(135deg, #f2efe9 40%, #fff 41% 50%, #f7d18a 51% 56%, #e8e4dc 57%); }
+.muestra-sat { background: radial-gradient(circle at 30% 30%, #6f7f4f, #3e4a2f 55%, #2f3a3f); }
+.menu-base .rango { padding: 8px 2px 0; }
+.menu-base .rango span { float: right; }
+
+/* Referencias y capas de utilidad */
+.referencias { margin: 10px 12px 4px; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 10px; background: #262626; }
+.ref-titulo { margin: 0 0 6px; font: 600 13px/1.2 var(--cond); color: var(--tinta-suave); letter-spacing: .02em; }
+.referencias .formas { padding: 2px 0; gap: 6px 16px; color: var(--tinta); }
+.referencias .formas + .formas { margin-top: 4px; }

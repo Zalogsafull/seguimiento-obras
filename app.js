@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-7";
+import { crearApi } from "./api.js?v=2026-11-20-8";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -467,7 +467,7 @@ async function cargar() {
 // ------------------------------------------------------------ pestañas
 function verTab(t) {
   S.tab = t;
-  if (typeof UI !== "undefined" && UI.modo === "ajustes") { UI.modo = "capas"; guardarUI(); aplicarUI(); }
+  if (typeof UI !== "undefined" && UI.modo !== "capas") { UI.modo = "capas"; guardarUI(); aplicarUI(); }
   escribirJSON(CLAVE_VISTA, { ...(leerJSON(CLAVE_VISTA) || {}), tab: t });
   document.querySelectorAll("#pestanas [data-tab]").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === t));
   document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = d.dataset.panel !== t));
@@ -498,17 +498,8 @@ function pintarCapas() {
       </div>`).join("")}
     </div>`;
   }).join("");
-  const formas = [["estructura", { estructura: "MÁSTIL" }, "Mástil"], ["estructura", { estructura: "MONOPOLO" }, "Monopolo"],
-    ["obra", { descripcion: "OBRA" }, "Obra"], ["obra", { descripcion: "COSITIO" }, "Cositio"]]
-    .map(([tp, o, nm]) => `<span>${svgForma(forma(tp, o), "#ffffff", "#52626D", forma(tp, o) === "asterisco" ? 15 : 12)}${nm}</span>`).join("");
-  const relev = `<div class="arbol-grupo"><div class="nodo-capa">
-      <span class="sim">${svgRelev(11)}</span>
-      <label><input type="checkbox" data-relev ${S.capaOn.relev ? "checked" : ""}> Relevamiento</label>
-      <span class="n">${relevFiltrados().length}</span></div>
-      ${S.relevFalta ? `<p class="nota" style="margin:4px 0 0">Todavía no se puede leer desde la web: hay que correr sql/parte5_relevamiento.sql en Neon.</p>` : ""}</div>`;
   const p = $("#panel-capas");
-  p.innerHTML = `${html}${relev}
-    <div class="arbol-grupo"><p class="nodo nodo-grupo">Formas</p><div class="formas">${formas}</div></div>
+  p.innerHTML = `${referencias()}${html}
 
     ${filtrosActivos() ? `<p class="nota aviso-filtro">Hay ${filtrosActivos()} filtro${filtrosActivos() > 1 ? "s" : ""} activo${filtrosActivos() > 1 ? "s" : ""}: las cantidades ya los tienen en cuenta.</p>` : ""}`;
   p.querySelectorAll('[data-medio="true"]').forEach((el) => (el.indeterminate = true));
@@ -627,6 +618,67 @@ function ultimaFicha(tipo, id) {
   return g ? [g.hitos, g.notas] : [null, null];
 }
 
+// ------------------------------------------------------------ mapa base (Gris, Calles, Satélite)
+function cambiarBase(nombre) {
+  if (!S.base[nombre]) return;
+  S.baseNombre = nombre;
+  for (const [k, l] of Object.entries(S.base)) k === nombre ? l.addTo(S.mapa) : l.remove();
+  $("#mapa").classList.toggle("fondo-oscuro", nombre.startsWith("Gris"));
+  guardarEstado();
+  if (UI.modo === "ajustes" && !UI.plegado) pintarAjustes();
+  pintarMenuBase();
+}
+// radios de base y control de calles dentro de un contenedor (Ajustes o el menú del botón del mapa)
+function enlazarBase(cont) {
+  const r = cont.querySelector("input[name=calles]");
+  if (r) r.oninput = () => {
+    S.callesGris = Number(r.value) / 100;
+    S.base["Gris (como QGIS)"].setOpacity(S.callesGris);
+    cont.querySelector(".valor-calles").textContent = r.value + "%";
+  };
+  cont.onchange = (ev) => {
+    if (ev.target.name === "base") cambiarBase(ev.target.value);
+    if (ev.target.name === "calles") guardarEstado();
+  };
+}
+const ICONO_BASE = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 4v13.5M15 6.5V20" stroke="currentColor" stroke-width="1.8"/></svg>';
+function pintarMenuBase() {
+  const m = $(".menu-base");
+  if (!m) return;
+  m.innerHTML = `<p class="ref-titulo">Mapa de fondo</p>
+    ${Object.keys(S.base).map((b) => `<label class="opcion-base"><input type="radio" name="base" value="${b}" ${S.baseNombre === b ? "checked" : ""}>
+      <span class="muestra muestra-${b === "Satélite" ? "sat" : b === "Calles" ? "calles" : "gris"}"></span>${b === "Gris (como QGIS)" ? "Gris (como QGIS)" : b}</label>`).join("")}
+    ${S.baseNombre.startsWith("Gris") ? `<label class="rango">Calles en el fondo gris <span class="valor-calles">${Math.round(S.callesGris * 100)}%</span>
+      <input type="range" name="calles" min="0" max="80" step="5" value="${Math.round(S.callesGris * 100)}"></label>` : ""}`;
+  enlazarBase(m);
+}
+function agregarBotonBase() {
+  const Ctrl = L.Control.extend({
+    options: { position: "topright" },
+    onAdd() {
+      const div = L.DomUtil.create("div", "leaflet-bar ctrl-base");
+      const a = L.DomUtil.create("a", "", div);
+      a.href = "#"; a.role = "button"; a.title = "Mapa de fondo"; a.setAttribute("aria-label", "Mapa de fondo"); a.setAttribute("aria-expanded", "false");
+      a.innerHTML = ICONO_BASE;
+      const menu = L.DomUtil.create("div", "menu-base", div);
+      menu.hidden = true;
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.disableScrollPropagation(div);
+      const cerrar = () => { menu.hidden = true; a.setAttribute("aria-expanded", "false"); div.classList.remove("activo"); };
+      L.DomEvent.on(a, "click", (ev) => {
+        L.DomEvent.preventDefault(ev);
+        if (!menu.hidden) return cerrar();
+        pintarMenuBase();
+        menu.hidden = false; a.setAttribute("aria-expanded", "true"); div.classList.add("activo");
+      });
+      S.mapa.on("click movestart", cerrar);
+      document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") cerrar(); });
+      return div;
+    },
+  });
+  new Ctrl().addTo(S.mapa);
+}
+
 // ------------------------------------------------------------ ajustes (cuenta, mapa y datos guardados)
 function pintarAjustes() {
   const rol = editor() ? "Editor" : "Solo lectura";
@@ -635,30 +687,55 @@ function pintarAjustes() {
   m.innerHTML = `
     <div class="segmentado bases-seg" role="radiogroup" aria-label="Mapa base">${Object.keys(S.base).map((b) =>
       `<label><input type="radio" name="base" value="${b}" ${S.baseNombre === b ? "checked" : ""}> ${b === "Gris (como QGIS)" ? "Gris" : b}</label>`).join("")}</div>
-    ${S.baseNombre.startsWith("Gris") ? `<label class="rango">Calles en el fondo gris <span id="valor-calles">${Math.round(S.callesGris * 100)}%</span>
-      <input type="range" name="calles" min="0" max="80" step="5" value="${Math.round(S.callesGris * 100)}"></label>` : ""}
-    <label class="interruptor-fila"><input type="checkbox" name="deptos" ${S.deptosOn ? "checked" : ""}><span>Límites de departamentos</span></label>`;
-  const r = m.querySelector("input[name=calles]");
-  if (r) r.oninput = () => {
-    S.callesGris = Number(r.value) / 100;
-    S.base["Gris (como QGIS)"].setOpacity(S.callesGris);
-    $("#valor-calles").textContent = r.value + "%";
-  };
-  m.onchange = (ev) => {
-    const el = ev.target;
-    if (el.name === "base") {
-      S.baseNombre = el.value;
-      for (const [k, l] of Object.entries(S.base)) k === el.value ? l.addTo(S.mapa) : l.remove();
-      $("#mapa").classList.toggle("fondo-oscuro", el.value.startsWith("Gris"));
-      pintarAjustes();
-    }
-    if (el.name === "deptos") { S.deptosOn = el.checked; el.checked ? S.deptos.addTo(S.mapa) : S.deptos.remove(); }
-    guardarEstado();
-  };
+    ${S.baseNombre.startsWith("Gris") ? `<label class="rango">Calles en el fondo gris <span class="valor-calles">${Math.round(S.callesGris * 100)}%</span>
+      <input type="range" name="calles" min="0" max="80" step="5" value="${Math.round(S.callesGris * 100)}"></label>` : ""}`;
+  enlazarBase(m);
   const fichas = Object.keys(leerJSON(CLAVE_FICHAS) || {}).length;
   $("#ajustes-datos").textContent = S.datosDe
     ? `Datos ${cuandoTexto(S.datosDe)}, con ${fichas} ficha${fichas === 1 ? "" : "s"} guardada${fichas === 1 ? "" : "s"} para ver sin señal.`
     : "Todavía no hay datos guardados.";
+}
+
+// Referencias: qué quiere decir cada forma y cada borde (como la leyenda de QGIS).
+function referencias() {
+  const f = (tp, o, nm) => `<span>${svgForma(forma(tp, o), "#ffffff", "#7a7a7a", forma(tp, o) === "asterisco" ? 16 : 13)}${nm}</span>`;
+  return `<div class="referencias" aria-label="Referencias">
+    <p class="ref-titulo">Referencias</p>
+    <div class="formas">
+      ${f("estructura", { estructura: "MÁSTIL" }, "Mástil")}${f("estructura", { estructura: "MONOPOLO" }, "Monopolo")}
+      ${f("obra", { descripcion: "OBRA" }, "Obra")}${f("obra", { descripcion: "COSITIO" }, "Cositio")}
+    </div>
+    <div class="formas">
+      <span>${svgForma("circulo", "#f2d024", "#e0c200", 17, 1.8)}Borde amarillo: espera recepción</span>
+      <span>${svgForma("circulo", "#838383", "#1a1a1a", 13)}Gris: terminada</span>
+    </div>
+    <p class="nota" style="margin:4px 0 0">El color es la etapa: blanco proyecto, celeste aprobado, rojo hormigonado, amarillo montaje, verde infraestructura.</p>
+  </div>`;
+}
+
+// ------------------------------------------------------------ capas de utilidad
+function pintarUtilidad() {
+  const u = $("#panel-utilidad");
+  const linea = '<svg width="18" height="12" viewBox="0 0 18 12" aria-hidden="true"><path d="M1 9 6 3l5 5 6-6" fill="none" stroke="#9a9a9a" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+  u.innerHTML = `<div class="arbol-grupo">
+      <div class="nodo-capa">
+        <span class="sim">${svgRelev(11)}</span>
+        <label><input type="checkbox" data-relev ${S.capaOn.relev ? "checked" : ""}> Relevamiento</label>
+        <span class="n">${relevFiltrados().length}</span>
+      </div>
+      ${S.relevFalta ? `<p class="nota" style="margin:2px 0 6px 26px">Todavía no se puede leer desde la web: hay que correr sql/parte5_relevamiento.sql en Neon.</p>`
+        : `<p class="nota" style="margin:0 0 6px 26px">Puntos tomados con el GPS, con su Z. Se agregan desde + Punto nuevo.</p>`}
+      <div class="nodo-capa">
+        <span class="sim">${linea}</span>
+        <label><input type="checkbox" name="deptos" ${S.deptosOn ? "checked" : ""}> Límites de departamentos</label>
+        <span class="n">19</span>
+      </div>
+    </div>`;
+  u.onchange = (ev) => {
+    const el = ev.target;
+    if ("relev" in el.dataset) { S.capaOn.relev = el.checked; pintar(); }
+    if (el.name === "deptos") { S.deptosOn = el.checked; el.checked ? S.deptos.addTo(S.mapa) : S.deptos.remove(); guardarEstado(); }
+  };
 }
 
 // ------------------------------------------------------------ filtros
@@ -716,6 +793,7 @@ function pintarPanel(rehacerFiltros = true) {
   if (S.tab === "lista") pintarLista(v);
   if (S.tab === "venc") pintarVencimientos();
   if (UI.modo === "ajustes") pintarAjustes();
+  if (UI.modo === "utilidad") pintarUtilidad();
   return v;
 }
 
@@ -791,6 +869,7 @@ function prepararMapa() {
   S.base["Satélite"] = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 21, maxNativeZoom: 18, attribution: "Imágenes © Esri", crossOrigin: "anonymous" });
   if (!S.base[S.baseNombre]) S.baseNombre = "Gris (como QGIS)";
+  agregarBotonBase();
   S.base[S.baseNombre].addTo(S.mapa);
   $("#mapa").classList.toggle("fondo-oscuro", S.baseNombre.startsWith("Gris"));
   // Departamentos va de fondo: su panel queda debajo de los símbolos (que van en markerPane, 600).
@@ -1134,11 +1213,12 @@ function aplicarUI() {
   raiz.setProperty("--panel-ancho", movil.matches ? "100%" : UI.ancho + "px");
   raiz.setProperty("--hoja", UI.alto + "px");
   app.classList.toggle("plegado", UI.plegado);
-  if (UI.modo !== "ajustes") UI.modo = "capas";
-  const aj = UI.modo === "ajustes";
-  $("#pestanas").hidden = aj;
-  $("#titulo-ajustes").hidden = !aj;
-  document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = aj ? d.dataset.panel !== "ajustes" : d.dataset.panel !== S.tab));
+  if (!["capas", "utilidad", "ajustes"].includes(UI.modo)) UI.modo = "capas";
+  const otro = UI.modo !== "capas";
+  $("#pestanas").hidden = otro;
+  $("#titulo-panel").hidden = !otro;
+  $("#titulo-panel").textContent = UI.modo === "ajustes" ? "Ajustes" : "Capas de utilidad";
+  document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = d.dataset.panel !== (otro ? UI.modo : S.tab)));
   document.querySelectorAll(".ctrl-paneles a").forEach((a) => {
     const on = !UI.plegado && a.dataset.modo === UI.modo;
     a.classList.toggle("activo", on);
@@ -1160,10 +1240,11 @@ function abrirModo(modo) {
   UI.modo = modo;
   UI.plegado = false;
   guardarUI(); aplicarUI();
-  if (modo === "ajustes") pintarAjustes(); else pintarPanel();
+  if (modo === "ajustes") pintarAjustes(); else if (modo === "utilidad") pintarUtilidad(); else pintarPanel();
 }
 function agregarBotonesPaneles() {
   const ICONOS = {
+    utilidad: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 21s-6-5.6-6-10.4a6 6 0 0 1 12 0C18 15.4 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.2 10.6h5.6M12 7.8v5.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
     capas: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3.5 21 8l-9 4.5L3 8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m3 12 9 4.5 9-4.5M3 16l9 4.5 9-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
     ajustes: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M10.3 2.8h3.4l.5 2.6 1.6.9 2.5-.9 1.7 2.9-2 1.8v1.8l2 1.8-1.7 2.9-2.5-.9-1.6.9-.5 2.6h-3.4l-.5-2.6-1.6-.9-2.5.9-1.7-2.9 2-1.8v-1.8l-2-1.8 1.7-2.9 2.5.9 1.6-.9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
   };
@@ -1171,7 +1252,7 @@ function agregarBotonesPaneles() {
     options: { position: "topleft" },
     onAdd() {
       const div = L.DomUtil.create("div", "leaflet-bar ctrl-paneles");
-      for (const [modo, titulo] of [["capas", "Capas, filtros, lista y vencimientos"], ["ajustes", "Ajustes: cuenta y mapa"]]) {
+      for (const [modo, titulo] of [["capas", "Capas de obra: capas, filtros, lista y vencimientos"], ["utilidad", "Capas de utilidad: relevamiento y departamentos"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"]]) {
         const a = L.DomUtil.create("a", "", div);
         a.href = "#"; a.role = "button"; a.dataset.modo = modo; a.title = titulo; a.setAttribute("aria-label", titulo);
         a.innerHTML = ICONOS[modo];
