@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-6";
+import { crearApi } from "./api.js?v=2026-11-20-7";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -771,7 +771,7 @@ function pintarVencimientos() {
 // ------------------------------------------------------------ mapa
 function prepararMapa() {
   if (S.mapa) return;
-  S.mapa = L.map("mapa", { zoomControl: false, attributionControl: true }).setView([-32.6, -56.0], 7);
+  S.mapa = L.map("mapa", { zoomControl: false, attributionControl: true, maxZoom: 21 }).setView([-32.6, -56.0], 7);
   agregarBotonesPaneles();
   L.control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(S.mapa);
   agregarBotonUbicacion();
@@ -785,11 +785,11 @@ function prepararMapa() {
   });
   // Gris como QGIS: calles en escala de grises invertida, muy atenuadas sobre el gris #212121.
   S.base["Gris (como QGIS)"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "© OpenStreetMap", className: "tiles-gris", opacity: S.callesGris, crossOrigin: "anonymous" });
+    maxZoom: 21, maxNativeZoom: 19, attribution: "© OpenStreetMap", className: "tiles-gris", opacity: S.callesGris, crossOrigin: "anonymous" });
   S.base["Calles"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "© OpenStreetMap", crossOrigin: "anonymous" });
+    maxZoom: 21, maxNativeZoom: 19, attribution: "© OpenStreetMap", crossOrigin: "anonymous" });
   S.base["Satélite"] = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 19, attribution: "Imágenes © Esri", crossOrigin: "anonymous" });
+    maxZoom: 21, maxNativeZoom: 18, attribution: "Imágenes © Esri", crossOrigin: "anonymous" });
   if (!S.base[S.baseNombre]) S.baseNombre = "Gris (como QGIS)";
   S.base[S.baseNombre].addTo(S.mapa);
   $("#mapa").classList.toggle("fondo-oscuro", S.baseNombre.startsWith("Gris"));
@@ -1235,31 +1235,53 @@ function prepararPanel() {
 const LISTA_ESTRUCTURA = ["MONOPOLO 25", "MONOPOLO 40", "MONOPOLO 50", "MÁSTIL 60", "MÁSTIL 75", "MÁSTIL 80", "MÁSTIL 100"];
 const LISTA_DO = ["E.V.", "G.S.", "N.R.", "P.C.", "R.P."];
 
-// Lee coordenadas WGS 84: "-32.28313, -54.85191", "-32.28313 -54.85191" o en grados, minutos y segundos.
+// Lee coordenadas WGS 84 escritas de muchas formas:
+//   -32.28313, -54.85191            (grados decimales, como en QGIS)
+//   32°16'59.3"S 54°51'06.9"W       (con símbolos)
+//   31 27 55.41 sur 54 57 49.19 oeste  /  31, 27, 55.41 S, 54, 57, 49.19 O  (sin símbolos)
+//   31 27 55.41 54 57 49.19         (grados, minutos, segundos; sin signo ni letra)
+//   31 27.923 54 57.82              (grados y minutos con decimales)
 function leerCoordenadas(texto) {
-  const t = String(texto || "").trim();
+  let t = String(texto || "").trim().toLowerCase();
   if (!t) return null;
-  let nums;
-  // grados, minutos y segundos: 32°16'59.3"S 54°51'06.9"W (también con O de oeste)
-  const dms = [...t.matchAll(/(-?\d+(?:[.,]\d+)?)\s*[°º]\s*(?:(\d+(?:[.,]\d+)?)\s*['’′]\s*)?(?:(\d+(?:[.,]\d+)?)\s*(?:"|”|″|''))?\s*([NSEOW])?/gi)];
-  if (dms.length >= 2) {
-    const num = (x) => parseFloat(String(x || "0").replace(",", "."));
-    nums = dms.slice(0, 2).map((m) => {
-      let v = Math.abs(num(m[1])) + num(m[2]) / 60 + num(m[3]) / 3600;
-      if (num(m[1]) < 0 || /[SOW]/i.test(m[4] || "")) v = -v;
-      return v;
-    });
-  } else {
-    // decimales: "-32.28313, -54.85191" o "-32.28313 -54.85191"; con coma decimal: "-32,28313 -54,85191"
-    const comaDecimal = !t.includes(".") && /-?\d+,\d+\s+-?\d+,\d+/.test(t);
-    const limpio = comaDecimal ? t.replace(/(\d),(\d)/g, "$1.$2") : t;
-    nums = (limpio.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
-    if (nums.length < 2) return null;
-    nums = nums.slice(0, 2);
-  }
-  let [lat, lon] = nums;
-  // En Uruguay latitud y longitud son negativas: si faltan los signos, se agregan.
-  if (lat > 0 && lon > 0) { lat = -lat; lon = -lon; }
+  // palabras y letras de hemisferio; los símbolos de grados, minutos y segundos pasan a ser separadores
+  t = t.replace(/oeste/g, " o ").replace(/sur/g, " s ").replace(/norte/g, " n ").replace(/este/g, " e ")
+    .replace(/[°º'’′"”″]/g, " ");
+  // coma decimal ("55,41") solo si no hay puntos; si no, la coma separa
+  if (!t.includes(".")) t = t.replace(/(\d),(\d)/g, "$1.$2");
+  const piezas = t.match(/-?\d+(?:\.\d+)?|\b[nsewo]\b/g) || [];
+  // se arman dos grupos: latitud y longitud, cada uno con sus números y su letra
+  const nums = piezas.filter((x) => /\d/.test(x)).map(Number);
+  const letras = piezas.filter((x) => !/\d/.test(x));
+  let grupos;
+  const conLetra = letras.length >= 1 && /\d/.test(piezas[0]);
+  if (conLetra && letras.length >= 2) {
+    // "31 27 55.41 s 54 57 49.19 o": cada letra cierra su grupo
+    grupos = [[], []];
+    let g = 0;
+    for (const x of piezas) {
+      if (/\d/.test(x)) { if (g < 2) grupos[g].push(Number(x)); }
+      else g++;
+    }
+  } else if (nums.length === 2 || nums.length === 4 || nums.length === 6) {
+    const n = nums.length / 2;
+    grupos = [nums.slice(0, n), nums.slice(n)];
+  } else return null;
+  if (!grupos[0].length || !grupos[1].length || grupos.some((g) => g.length > 3)) return null;
+  const decimal = (g) => {
+    const [d, m = 0, sg = 0] = g;
+    if (m < 0 || m >= 60 || sg < 0 || sg >= 60) return NaN;
+    const v = Math.abs(d) + m / 60 + sg / 3600;
+    return d < 0 || Object.is(d, -0) ? -v : v;
+  };
+  let lat = decimal(grupos[0]), lon = decimal(grupos[1]);
+  if (isNaN(lat) || isNaN(lon)) return null;
+  // letras explícitas: S y O/W negativas
+  const [l1, l2] = letras;
+  if (l1 === "s" || (!l1 && lat > 0 && lon > 0)) lat = -Math.abs(lat);
+  if (l2 === "o" || l2 === "w" || (!l2 && lon > 0 && (l1 === "s" || !l1))) lon = -Math.abs(lon);
+  // en Uruguay latitud y longitud son negativas: si faltan los signos, se agregan
+  if (lat > 0 && lon > 0 && !letras.length) { lat = -lat; lon = -lon; }
   let invertidas = false;
   if (lat < -45 && lon > -45) { [lat, lon] = [lon, lat]; invertidas = true; }
   return { lat, lon, invertidas };
@@ -1304,7 +1326,7 @@ function ponerMarca(lat, lon, centrar) {
 // En el celular el formulario tapa la mitad de abajo: la marca se centra en la parte visible.
 function centrarEnMarca() {
   if (NV.lat == null) return;
-  S.mapa.setView([NV.lat, NV.lon], Math.max(S.mapa.getZoom(), 15), { animate: false });
+  S.mapa.setView([NV.lat, NV.lon], Math.max(S.mapa.getZoom(), 17), { animate: false });
   if (movil.matches) S.mapa.panBy([0, $("#nuevo").offsetHeight / 2], { animate: false });
 }
 
@@ -1426,7 +1448,7 @@ function pintarNuevo() {
           <input name="coord" placeholder="-32.28313, -54.85191" aria-label="Coordenadas WGS 84" autocomplete="off" inputmode="text">
           <button class="boton" type="button" id="buscar-coord">Buscar</button>
         </div>
-        <p class="nota pista">Latitud y longitud en grados decimales (como en QGIS) o en grados, minutos y segundos: 32°16'59"S 54°51'07"W.</p>
+        <p class="nota pista">Grados decimales como en QGIS (-31.46539, -54.96366) o grados, minutos y segundos sin símbolos: 31 27 55.41 S 54 57 49.19 O.</p>
         <p class="error" id="error-coord" hidden></p>
         <div id="ubicacion-ok" hidden>
           <div class="dos">
@@ -1637,7 +1659,7 @@ function agregarBotonUbicacion() {
             punto = L.circleMarker(ll, { radius: 7, color: "#fff", weight: 2.5, fillColor: "#2F80ED", fillOpacity: 1 })
               .bindTooltip("Estás acá").addTo(S.mapa);
           } else { punto.setLatLng(ll); radio.setLatLng(ll).setRadius(prec); }
-          S.mapa.setView(ll, Math.max(S.mapa.getZoom(), 14));
+          S.mapa.setView(ll, Math.max(S.mapa.getZoom(), 17));
           if (movil.matches && !$("#nuevo").hidden) S.mapa.panBy([0, $("#nuevo").offsetHeight / 2], { animate: false });
         }, (err) => {
           buscando = false; div.classList.remove("buscando");
