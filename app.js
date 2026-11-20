@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-12";
+import { crearApi } from "./api.js?v=2026-11-20-13";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -621,9 +621,7 @@ function editarDatos(tipo, o) {
       aviso("Datos guardados");
       await abrirFicha(tipo, o.id);
     } catch (e) {
-      err.textContent = /permission|denied|permiso/i.test(e.message)
-        ? "La base todavía no deja cambiar algunos de estos datos: corré sql/parte6_editar_datos.sql en Neon y tocá Refresh schema cache."
-        : /fetch|network|tiempo/i.test(e.message) ? "Sin conexión: no se guardó. Probá de nuevo cuando tengas señal." : e.message;
+      err.textContent = /fetch|network|tiempo/i.test(e.message) ? "Sin conexión: no se guardó. Probá de nuevo cuando tengas señal." : e.message;
       err.hidden = false;
       b.disabled = false; b.textContent = "Guardar";
     }

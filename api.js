@@ -13,6 +13,14 @@ function chequear({ data, error }, que) {
 async function crearNeon() {
   const { createClient } = await import("./vendor/neon.js");
   const neon = createClient({ auth: { url: NEON_AUTH_URL }, dataApi: { url: NEON_DATA_API_URL } });
+  const editarCapa = async (tipo, id, cambios, que) => {
+    const { error } = await neon.rpc("editar_capa", { p_tipo: tipo, p_id: id, p_cambios: cambios });
+    if (!error) return;
+    const m = error.message || String(error);
+    if (/editar_capa|schema cache|function/i.test(m))
+      throw new Error(`${que}: falta preparar la base. Corré sql/parte7_editar_por_funcion.sql en Neon y tocá Refresh schema cache en la Data API.`);
+    throw new Error(`${que}: ${m}`);
+  };
 
   return {
     async usuario() {
@@ -61,11 +69,13 @@ async function crearNeon() {
     async agregarNota(tipo, id, nota) {
       chequear(await neon.from("cuaderno").insert({ ...nota, [CLAVE[tipo]]: id }), "Guardar en el cuaderno");
     },
+    // Los cambios en las capas van por la función editar_capa: la Data API no encuentra
+    // "Estructuras OICI Obra" por los espacios del nombre (sql/parte7_editar_por_funcion.sql).
     async cambiarEstado(tipo, id, valor) {
-      chequear(await neon.from(TABLA[tipo]).update({ [CAMPO_ESTADO[tipo]]: valor }).eq("fid", id), "Cambiar estado");
+      await editarCapa(tipo, id, { [CAMPO_ESTADO[tipo]]: valor }, "Cambiar estado");
     },
     async guardarDatos(tipo, id, cambios) {
-      chequear(await neon.from(TABLA[tipo]).update(cambios).eq("fid", id), "Guardar datos");
+      await editarCapa(tipo, id, cambios, "Guardar datos");
     },
     async adminUsuarios() { return chequear(await neon.rpc("admin_usuarios"), "Usuarios"); },
     async crearPunto(capa, lat, lon, datos) {
