@@ -3,7 +3,7 @@
 #
 # Qué cambia (solo la presentación; los datos no se tocan):
 #  - Árbol de capas: grupo ESTRUCTURAS (Obra, Recepciones, terminadas), grupo OBRAS (Obras)
-#    y grupo UTILIDAD (Relevamiento). Las demás capas quedan donde están.
+#    y grupo UTILIDAD (Relevamiento y Departamentos). Las demás capas quedan donde están.
 #  - Simbología por reglas, con los mismos nombres, colores, formas y cortes que la web:
 #      Obra:         En proyecto · P. ejecutivo aprobado · Hormigonando · Montando · En infraestructura
 #      Recepciones:  todas las terminadas sin definitiva → En plazo · 3 a 6 meses · menos de 3 meses
@@ -198,9 +198,11 @@ def principal():
         mover(lyr, g_est, i)
     g_obras = grupo("OBRAS", RAIZ.children().index(g_est) + 1)
     mover(obras, g_obras, 0)
-    if relev:
+    deptos = capa("Departamentos")
+    if relev or deptos:  # como "Capas de utilidad" en la web
         g_util = grupo("UTILIDAD", RAIZ.children().index(g_obras) + 1)
-        mover(relev, g_util, 0)
+        for i, lyr in enumerate([c for c in (relev, deptos) if c]):
+            mover(lyr, g_util, i)
     # grupos que quedaron vacíos por estos movimientos
     for g in VACIADOS:
         try:
@@ -208,7 +210,7 @@ def principal():
                 g.parent().removeChildNode(g)
         except RuntimeError:
             pass
-    print("· árbol: ESTRUCTURAS (Obra, Recepciones, terminadas) · OBRAS · UTILIDAD")
+    print("· árbol: ESTRUCTURAS (Obra, Recepciones, terminadas) · OBRAS · UTILIDAD (Relevamiento, Departamentos)")
 
     # Nombres del campo ETAPA en el formulario (último hito terminado)
     etapas_e = [("1 · Proyecto", "1"), ("2 · Proyecto aprobado (si está en obra: hormigonando)", "2"),
