@@ -424,3 +424,12 @@ body.con-tabla .mapa-zona { display: none; }
 .fin-previsto input { padding: 4px 6px; border: 1px solid var(--linea); border-radius: 6px; background: var(--campo); color: var(--tinta); font-size: 13px; }
 .fin-previsto.tarde { border-left-color: #FF5A4F; }
 .fin-previsto.tarde span { color: #FF8A80; font-weight: 600; }
+
+/* Importar Excel */
+.tabla-import { padding: 10px 14px; background: #2b2a22; border-bottom: 1px solid #5a5233; font-size: 13px; max-height: 40vh; overflow: auto; }
+.tabla-import[hidden] { display: none; }
+.imp-cabeza { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.imp-cabeza span { color: var(--tinta-suave); margin-right: auto; }
+.imp-mal { margin: 8px 0 0; color: #FF8A80; }
+.imp-lista { margin: 8px 0 0; padding-left: 18px; color: var(--tinta); }
+.imp-lista li { margin: 2px 0; }

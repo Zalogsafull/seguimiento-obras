@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-27";
+import { crearApi } from "./api.js?v=2026-11-20-28";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -59,10 +59,10 @@ function svgForma(f, relleno, borde, px, grosor = 1.2) {
 }
 function simbolo(tipo, o, cat, escala = 1) {
   const c = CAT[cat], f = forma(tipo, o);
-  const grande = c.recepcion || f === "asterisco";
+  const grande = f === "asterisco";
   const px = Math.round((grande ? 18 : 13) * escala);
   const borde = c.recepcion ? "#e0c200" : c.terminada ? "#1a1a1a" : "#7a7a7a";
-  return svgForma(f, c.color, borde, px, c.recepcion ? 1.8 : 1.2);
+  return svgForma(f, c.color, borde, px, c.recepcion ? 1.6 : 1.2);
 }
 
 const ESCALERA = {
@@ -450,6 +450,10 @@ function mostrarApp() {
   $("#estado-datos").onclick = () => { if (S.estadoRed === "sinred") actualizar(); };
   $("#actualizar-ahora").onclick = async () => { await actualizar(); pintarAjustes(); };
   $("#inf-pdf").onclick = (ev) => hacerInforme(ev.currentTarget);
+  $("#inf-excel").onclick = (ev) => {
+    const id = $("#inf-capa").value;
+    exportarExcel(id, filasDeCapa(id, $("#inf-filtros").checked).sort(porCodigo), ev.currentTarget);
+  };
   $("#abrir-tabla").onclick = abrirTabla;
   prepararMapa();
   prepararPanel();
@@ -1144,9 +1148,12 @@ function pintarTabla() {
       <input id="t-buscar" type="search" placeholder="Buscar en la tabla" value="${esc(T.texto)}" aria-label="Buscar">
       <label class="t-check"><input type="checkbox" id="t-respetar" ${T.respetar ? "checked" : ""}> Respetar filtros y categorías</label>
       <span class="t-cuenta">${xs.length} fila${xs.length === 1 ? "" : "s"}${T.sel.size ? ` · ${T.sel.size} elegida${T.sel.size === 1 ? "" : "s"}` : ""}</span>
-      <button class="boton boton-chico" type="button" id="t-csv">Exportar CSV</button>
+      <button class="boton boton-chico" type="button" id="t-excel">Exportar Excel</button>
+      ${puede ? `<button class="boton boton-chico" type="button" id="t-importar" title="Subir un Excel exportado desde acá, con datos cambiados">Importar Excel</button>
+        <input type="file" id="t-archivo" accept=".xlsx,.xls" hidden>` : ""}
       <button class="cerrar" type="button" id="t-cerrar" aria-label="Cerrar la tabla" title="Cerrar la tabla">✕</button>
     </div>
+    <div class="tabla-import" id="t-import" hidden></div>
     ${puede ? `<form class="tabla-masivo" id="t-masivo" ${T.sel.size ? "" : "hidden"}>
       <b>Cambiar en ${T.sel.size} elegida${T.sel.size === 1 ? "" : "s"}:</b>
       <select name="campo" aria-label="Campo">${editables.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select>
@@ -1178,7 +1185,12 @@ function pintarTabla() {
   const b = $("#t-buscar");
   b.oninput = () => { T.texto = b.value; clearTimeout(T.timer); T.timer = setTimeout(() => { pintarTabla(); const nb = $("#t-buscar"); nb.focus(); nb.setSelectionRange(nb.value.length, nb.value.length); }, 250); };
   $("#t-respetar").onchange = (ev) => { T.respetar = ev.target.checked; pintarTabla(); };
-  $("#t-csv").onclick = () => exportarCSV(xs, cols, tipo);
+  $("#t-excel").onclick = (ev) => exportarExcel(T.capa, xs, ev.currentTarget);
+  const imp = $("#t-importar");
+  if (imp) {
+    imp.onclick = () => $("#t-archivo").click();
+    $("#t-archivo").onchange = (ev) => { const f = ev.target.files[0]; if (f) importarExcel(f); ev.target.value = ""; };
+  }
   caja.querySelectorAll("th[data-orden]").forEach((th) => (th.onclick = () => {
     const k = th.dataset.orden;
     T.desc = T.orden === k ? !T.desc : false;
@@ -1283,16 +1295,174 @@ async function aplicarMasivo(tipo, k, v, ids) {
   pintarTabla();
 }
 
-function exportarCSV(xs, cols, tipo) {
-  const celda = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lineas = [cols.map(([, n]) => celda(n)).join(";")];
-  for (const x of xs) lineas.push(cols.map(([k]) => celda(valorTabla(x, k))).join(";"));
-  const blob = new Blob(["﻿" + lineas.join("\r\n")], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `${T.capa}-${hoy()}.csv`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+
+// ------------------------------------------------------------ Excel: exportar y volver a subir con cambios
+async function prepararExcel() {
+  await cargarScript("vendor/xlsx/xlsx.full.min.js");
+  return window.XLSX;
+}
+const TITULO_CORTO = { "Planos (enlace a la carpeta)": "Planos" };
+// Columnas de la hoja: [título, cómo leer el valor, columna de la capa si se puede cambiar, tipo]
+function columnasExcel(tipo) {
+  if (tipo === "relevamiento") return [
+    ["ID", (x) => x.o.id], ["Código", (x) => x.o.codigo], ["Descripción", (x) => x.o.descripcion],
+    ["Latitud", (x) => Number(x.o.lat)], ["Longitud", (x) => Number(x.o.lon)], ["Z (m)", (x) => (x.o.z == null || x.o.z === "" ? null : Number(x.o.z))]];
+  const comoFecha = (v) => (v ? new Date(String(v).slice(0, 10) + "T12:00:00") : null);
+  const cols = [["ID", (x) => x.o.id], ["Código", (x) => x.o.codigo], ["Etapa", (x) => CAT[x.cat].nombre],
+    ["Situación", (x) => x.o.estado, tipo === "estructura" ? "ESTADO" : "Estado", "estado"]];
+  for (const [col, k, etq, clase] of CAMPOS_EDITABLES[tipo]) {
+    cols.push([TITULO_CORTO[etq] || etq, (x) => (clase === "fecha" ? comoFecha(x.o[k]) : clase === "anio" && x.o[k] != null && x.o[k] !== "" ? Number(x.o[k]) : x.o[k] ?? null), col, clase, k]);
+  }
+  if (tipo === "estructura") cols.push(["Vence recepción", (x) => comoFecha(x.o.vence_recepcion)], ["Días a recepción", (x) => x.o.dias_para_recepcion ?? null]);
+  cols.push(["Hitos hechos", (x) => (x.o.hitos_total ? `${x.o.hitos_hechos ?? 0} de ${x.o.hitos_total}` : null)]);
+  return cols;
+}
+
+async function exportarExcel(id, xs, boton) {
+  const original = boton?.textContent;
+  if (boton) { boton.disabled = true; boton.textContent = "Armando el Excel…"; }
+  try {
+    const XLSX = await prepararExcel();
+    const capa = CAPAS_LISTA.find((c) => c.id === id);
+    const cols = columnasExcel(capa.tipo);
+    const filas = [cols.map((c) => c[0]), ...xs.map((x) => cols.map((c) => c[1](x) ?? null))];
+    const hoja = XLSX.utils.aoa_to_sheet(filas, { cellDates: true, dateNF: "dd/mm/yyyy" });
+    hoja["!cols"] = cols.map(([t]) => ({ wch: t === "Observaciones" ? 40 : t === "Planos" ? 30 : Math.max(10, t.length + 2) }));
+    hoja["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: filas.length - 1, c: cols.length - 1 } }) };
+    hoja["!freeze"] = { xSplit: 2, ySplit: 1 };
+    const editables = cols.filter((c) => c[2]).map((c) => c[0]);
+    const leeme = XLSX.utils.aoa_to_sheet([
+      ["Seguimiento de obras OICI", ""],
+      ["Capa", capa.nombre],
+      ["Tipo", capa.tipo],
+      ["Exportado", new Date().toLocaleString("es-UY")],
+      [""],
+      ["Cómo usar este archivo"],
+      ["1. Podés cambiar los valores de estas columnas:", editables.join(", ") || "(ninguna: esta capa no se edita desde la web)"],
+      ["2. No cambies la columna ID: es la que identifica cada fila en la base."],
+      ["3. Las demás columnas (Código, Etapa, vencimientos, hitos) son informativas: si las cambiás, no pasa nada."],
+      ["4. Situación: PROY (proyecto), CONS (en obra) o FIN (terminada). Recepción: RP, RD, PD o PR."],
+      ["5. Guardá el archivo y en la web andá a Tabla > Importar Excel. Antes de guardar te muestra la lista de cambios."],
+    ]);
+    leeme["!cols"] = [{ wch: 48 }, { wch: 90 }];
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, capa.tipo === "obra" ? "Obras" : capa.tipo === "relevamiento" ? "Relevamiento" : "Estructuras");
+    XLSX.utils.book_append_sheet(libro, leeme, "Leeme");
+    const archivo = `${capa.nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${hoy()}.xlsx`;
+    XLSX.writeFile(libro, archivo, { cellDates: true });
+    aviso("Excel listo: se descargó " + archivo);
+  } catch (e) {
+    aviso("No se pudo armar el Excel: " + e.message, true);
+  } finally {
+    if (boton) { boton.disabled = false; boton.textContent = original; }
+  }
+}
+
+// Valor de una celda del Excel llevado al formato de la base
+function normalizarExcel(v, clase) {
+  if (v == null || (typeof v === "string" && v.trim() === "")) return null;
+  if (clase === "fecha") {
+    if (v instanceof Date) {
+      // fecha local; si cae a última hora (redondeo de Excel), es el día siguiente
+      const d = v.getHours() >= 18 ? new Date(v.getTime() + 6 * 3600e3) : v;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+    const s = String(v).trim();
+    let m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+    if (m) { const a = m[3].length === 2 ? "20" + m[3] : m[3]; return `${a}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`; }
+    m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    throw new Error(`"${s}" no es una fecha (usá dd/mm/aaaa)`);
+  }
+  if (clase === "anio") {
+    const n = Number(String(v).trim());
+    if (!Number.isInteger(n) || n < 1990 || n > 2100) throw new Error(`"${v}" no es un año`);
+    return n;
+  }
+  if (clase === "estado") {
+    const s = String(v).trim().toUpperCase();
+    const m = { PROY: "PROY", PROYECTO: "PROY", CONS: "CONS", "EN OBRA": "CONS", FIN: "FIN", TERMINADA: "FIN" }[s];
+    if (!m) throw new Error(`"${v}" no es una situación (PROY, CONS o FIN)`);
+    return m;
+  }
+  if (clase === "recepcion") return String(v).trim().toUpperCase();
+  return String(v).trim();
+}
+const igualBase = (antes, ahora, clase) => {
+  const a = antes == null || antes === "" ? null : clase === "fecha" ? String(antes).slice(0, 10) : String(antes);
+  return a === (ahora == null ? null : String(ahora));
+};
+
+async function importarExcel(archivo) {
+  try {
+    const XLSX = await prepararExcel();
+    const libro = XLSX.read(await archivo.arrayBuffer(), { cellDates: true });
+    const nombre = libro.SheetNames.find((n) => n !== "Leeme");
+    const tipo = nombre === "Obras" ? "obra" : nombre === "Estructuras" ? "estructura" : null;
+    if (!tipo) throw new Error("Este archivo no es un Excel exportado desde la web (o es de Relevamiento, que no se puede importar).");
+    const filas = XLSX.utils.sheet_to_json(libro.Sheets[nombre], { header: 1, raw: true, defval: null });
+    const titulos = (filas[0] || []).map((t) => String(t ?? "").trim());
+    const iId = titulos.indexOf("ID");
+    if (iId < 0) throw new Error("Falta la columna ID.");
+    const cols = columnasExcel(tipo).filter((c) => c[2]).map((c) => ({ titulo: c[0], col: c[2], clase: c[3], k: c[4] || "estado", i: titulos.indexOf(c[0]) }))
+      .filter((c) => c.i >= 0);
+    const porId = new Map(S.datos[tipo].map((o) => [o.id, o]));
+    const cambios = [], problemas = [];
+    let sinId = 0;
+    for (const f of filas.slice(1)) {
+      if (!f || f.every((v) => v == null || v === "")) continue;
+      const id = Number(f[iId]), o = porId.get(id);
+      if (!o) { sinId++; continue; }
+      const c = {}, detalle = [];
+      for (const col of cols) {
+        let v;
+        try { v = normalizarExcel(f[col.i], col.clase); }
+        catch (e) { problemas.push(`${o.codigo} · ${col.titulo}: ${e.message}`); continue; }
+        if (!igualBase(o[col.k], v, col.clase)) {
+          c[col.col] = v;
+          const ver = (x) => (x == null || x === "" ? "vacío" : col.clase === "fecha" ? fecha(String(x).slice(0, 10)) : String(x));
+          detalle.push(`${col.titulo}: ${ver(o[col.k])} → ${ver(v)}`);
+        }
+      }
+      if (detalle.length) cambios.push({ id, codigo: o.codigo, c, detalle });
+    }
+    mostrarImportacion(tipo, archivo.name, cambios, problemas, sinId);
+  } catch (e) {
+    aviso("No se pudo leer el Excel: " + e.message, true);
+  }
+}
+
+function mostrarImportacion(tipo, nombre, cambios, problemas, sinId) {
+  const caja = $("#t-import");
+  const n = cambios.reduce((s, x) => s + x.detalle.length, 0);
+  caja.hidden = false;
+  caja.innerHTML = `<div class="imp-cabeza"><b>${esc(nombre)}</b>
+      <span>${cambios.length ? `${n} cambio${n === 1 ? "" : "s"} en ${cambios.length} ${tipo === "obra" ? "obra" : "estructura"}${cambios.length === 1 ? "" : "s"}` : "No hay cambios: el archivo tiene los mismos datos que la base."}</span>
+      ${cambios.length ? `<button class="boton boton-primario boton-chico" type="button" id="imp-aplicar">Guardar estos cambios</button>` : ""}
+      <button class="boton boton-chico" type="button" id="imp-cancelar">${cambios.length ? "Cancelar" : "Cerrar"}</button></div>
+    ${problemas.length ? `<p class="imp-mal">No se toman ${problemas.length} valor${problemas.length === 1 ? "" : "es"} con problemas: ${problemas.slice(0, 6).map(esc).join(" · ")}${problemas.length > 6 ? " …" : ""}</p>` : ""}
+    ${sinId ? `<p class="nota">${sinId} fila${sinId === 1 ? "" : "s"} sin un ID que exista en la base: se ignoran.</p>` : ""}
+    ${cambios.length ? `<ul class="imp-lista">${cambios.map((x) => `<li><b>${esc(x.codigo)}</b> ${x.detalle.map(esc).join(" · ")}</li>`).join("")}</ul>` : ""}`;
+  $("#imp-cancelar").onclick = () => { caja.hidden = true; caja.innerHTML = ""; };
+  const ap = $("#imp-aplicar");
+  if (ap) ap.onclick = async () => {
+    ap.disabled = true;
+    let hechos = 0, errores = 0, ultimo = "";
+    const cola = [...cambios];
+    const trabajar = async () => {
+      while (cola.length) {
+        const x = cola.shift();
+        try { await S.api.guardarDatos(tipo, x.id, x.c); hechos++; }
+        catch (e) { errores++; ultimo = `${x.codigo}: ${e.message}`; }
+        ap.textContent = `Guardando ${hechos + errores} de ${cambios.length}…`;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, cambios.length) }, trabajar));
+    aviso(errores ? `Se actualizaron ${hechos}; fallaron ${errores}. ${ultimo}` : `Listo: ${hechos} actualizada${hechos === 1 ? "" : "s"} desde el Excel`, errores > 0);
+    caja.hidden = true; caja.innerHTML = "";
+    await cargar();
+    pintarTabla();
+  };
 }
 
 // ------------------------------------------------------------ ajustes (cuenta, mapa y datos guardados)
@@ -1538,7 +1708,7 @@ function prepararMapa() {
 function icono(tipo, o, cat) {
   const c = CAT[cat];
   const activo = S.abierta && S.abierta.tipo === tipo && S.abierta.id === o.id;
-  const grande = c.recepcion || forma(tipo, o) === "asterisco";
+  const grande = forma(tipo, o) === "asterisco";
   const px = grande ? 18 : 13;
   return L.divIcon({
     className: `mk${activo ? " activo" : ""}`,
