@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-5";
+import { crearApi } from "./api.js?v=2026-11-20-6";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -526,6 +526,107 @@ function pintarCapas() {
   };
 }
 
+// ------------------------------------------------------------ editar los datos de una estructura u obra
+// Campos que se pueden cambiar desde la web: [columna en la capa, campo de la vista, etiqueta, tipo]
+const CAMPOS_EDITABLES = {
+  estructura: [
+    ["ESTRUCTURA", "estructura", "Estructura", "estructura"],
+    ["LICITACIÓN", "licitacion", "Licitación", "texto"],
+    ["AÑO", "anio", "Año", "anio"],
+    ["D.O.", "director_obra", "Director de obra", "do"],
+    ["FECHA INICIO", "fecha_inicio", "Inicio", "fecha"],
+    ["FECHA FIN", "fecha_fin", "Fin", "fecha"],
+    ["RECEPCIÓN", "recepcion", "Recepción", "recepcion"],
+    ["PLANOS", "planos", "Planos (enlace a la carpeta)", "url"],
+    ["OBSERVACIONES", "observaciones", "Observaciones", "largo"],
+  ],
+  obra: [
+    ["Sala", "sala", "Sala", "texto"],
+    ["Localidad", "localidad", "Localidad", "texto"],
+    ["Departamento", "departamento", "Departamento", "texto"],
+    ["Licitación", "licitacion", "Licitación", "texto"],
+    ["Tarea", "tarea", "Tarea", "texto"],
+    ["Descripción", "descripcion", "Tipo", "descripcion"],
+    ["D.O.", "director_obra", "Director de obra", "do"],
+    ["Planos", "planos", "Planos (enlace a la carpeta)", "url"],
+  ],
+};
+
+function editarDatos(tipo, o) {
+  const cuerpo = $("#datos-cuerpo"), lapiz = $("#editar-datos");
+  if (!cuerpo) return;
+  lapiz.hidden = true;
+  const valores = (k) => [...new Set(S.datos[tipo].map((x) => x[k]).filter((v) => v != null && v !== ""))]
+    .map(String).sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+  const opciones = (lista, actual) => {
+    const todas = [...new Set(["", ...lista, ...(actual ? [String(actual)] : [])])];
+    return todas.map((v) => `<option value="${esc(v)}" ${String(actual ?? "") === v ? "selected" : ""}>${esc(v) || "—"}</option>`).join("");
+  };
+  const lista = (id, vals) => `<datalist id="${id}">${vals.map((v) => `<option value="${esc(v)}">`).join("")}</datalist>`;
+  const campo = ([col, k, etiqueta, clase]) => {
+    const v = o[k] ?? "";
+    const nombre = `name="${esc(col)}"`;
+    if (clase === "estructura") return `<label>${etiqueta}<select ${nombre}>${opciones([...LISTA_ESTRUCTURA, ...valores(k)], v)}</select></label>`;
+    if (clase === "descripcion") return `<label>${etiqueta}<select ${nombre}>${opciones(["OBRA", "COSITIO", ...valores(k)], v)}</select></label>`;
+    if (clase === "recepcion") return `<label>${etiqueta}<select ${nombre}>${opciones(["RP", "RD", ...valores(k)], v)}</select></label>`;
+    if (clase === "anio") return `<label>${etiqueta}<input ${nombre} type="number" min="1990" max="2100" inputmode="numeric" value="${esc(v)}"></label>`;
+    if (clase === "fecha") return `<label>${etiqueta}<input ${nombre} type="date" value="${esc(String(v).slice(0, 10))}"></label>`;
+    if (clase === "url") return `<label>${etiqueta}<input ${nombre} type="url" value="${esc(v)}" placeholder="https://drive.google.com/…"></label>`;
+    if (clase === "largo") return `<label>${etiqueta}<textarea ${nombre} rows="3">${esc(v)}</textarea></label>`;
+    if (clase === "do") return `<label>${etiqueta}<input ${nombre} list="dl-ed-do" autocomplete="off" value="${esc(v)}" placeholder="Ej. G.S."></label>`;
+    return `<label>${etiqueta}<input ${nombre} list="dl-ed-${k}" autocomplete="off" value="${esc(v)}"></label>`;
+  };
+  const campos = CAMPOS_EDITABLES[tipo];
+  const dos = [...new Set([...LISTA_DO, ...valores("director_obra").flatMap(partesDO)])].sort();
+  cuerpo.innerHTML = `<form class="form form-datos" id="form-datos" novalidate>
+      ${campos.map(campo).join("")}
+      ${lista("dl-ed-do", dos)}
+      ${campos.filter((c) => c[3] === "texto").map((c) => lista(`dl-ed-${c[1]}`, valores(c[1]))).join("")}
+      ${tipo === "estructura" ? `<p class="nota" style="margin:0">El fin también se completa solo al tildar el hito de fin de obra.</p>` : ""}
+      <p class="error" id="error-datos" hidden></p>
+      <div class="dos">
+        <button class="boton" type="button" id="cancelar-datos">Cancelar</button>
+        <button class="boton boton-primario" type="submit">Guardar</button>
+      </div>
+    </form>`;
+  const f = $("#form-datos");
+  f.querySelector("input, select, textarea")?.focus({ preventScroll: true });
+  $("#cancelar-datos").onclick = () => pintarFicha(tipo, o, ...ultimaFicha(tipo, o.id));
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const err = $("#error-datos");
+    err.hidden = true;
+    const cambios = {};
+    for (const [col, k, etiqueta, clase] of campos) {
+      const el = f.elements[col];
+      let v = el.value.trim();
+      if (clase === "url" && v && !/^https?:\/\//i.test(v)) v = "https://" + v;
+      if (clase === "anio" && v && !/^\d{4}$/.test(v)) { err.textContent = "El año tiene que tener 4 cifras, por ejemplo 2025."; err.hidden = false; el.focus(); return; }
+      const antes = o[k] == null ? "" : String(clase === "fecha" ? String(o[k]).slice(0, 10) : o[k]);
+      if (v !== antes) cambios[col] = v === "" ? null : (clase === "anio" ? Number(v) : v);
+    }
+    if (!Object.keys(cambios).length) return pintarFicha(tipo, o, ...ultimaFicha(tipo, o.id));
+    const b = f.querySelector("button[type=submit]");
+    b.disabled = true; b.textContent = "Guardando…";
+    try {
+      await S.api.guardarDatos(tipo, o.id, cambios);
+      aviso("Datos guardados");
+      await abrirFicha(tipo, o.id);
+    } catch (e) {
+      err.textContent = /permission|denied|permiso/i.test(e.message)
+        ? "La base todavía no deja cambiar algunos de estos datos: corré sql/parte6_editar_datos.sql en Neon y tocá Refresh schema cache."
+        : /fetch|network|tiempo/i.test(e.message) ? "Sin conexión: no se guardó. Probá de nuevo cuando tengas señal." : e.message;
+      err.hidden = false;
+      b.disabled = false; b.textContent = "Guardar";
+    }
+  };
+}
+// hitos y cuaderno que se estaban mostrando, para volver a pintar la ficha sin pedirlos de nuevo
+function ultimaFicha(tipo, id) {
+  const g = fichaGuardada(tipo, id);
+  return g ? [g.hitos, g.notas] : [null, null];
+}
+
 // ------------------------------------------------------------ ajustes (cuenta, mapa y datos guardados)
 function pintarAjustes() {
   const rol = editor() ? "Editor" : "Solo lectura";
@@ -828,7 +929,8 @@ function pintarFicha(tipo, o, hitos, notas) {
 
   const datos = tipo === "estructura"
     ? [["Estructura", o.estructura], ["Licitación", o.licitacion], ["Año", o.anio], ["Director de obra", o.director_obra],
-       ["Inicio", fecha(o.fecha_inicio)], ["Fin", fecha(o.fecha_fin)], ["Recepción", o.recepcion || "—"]]
+       ["Inicio", fecha(o.fecha_inicio)], ["Fin", fecha(o.fecha_fin)], ["Recepción", o.recepcion || "—"],
+       ["Observaciones", o.observaciones]]
     : [["Sala", o.sala], ["Localidad", o.localidad], ["Departamento", o.departamento], ["Licitación", o.licitacion],
        ["Tarea", o.tarea], ["Descripción", o.descripcion], ["Director de obra", o.director_obra]];
   const boton = atajo;
@@ -872,8 +974,9 @@ function pintarFicha(tipo, o, hitos, notas) {
     </div>
 
     <div class="ficha-bloque">
-      <h2>Datos</h2>
-      <dl class="datos">${datos.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v ?? "—") || "—"}</dd>`).join("")}</dl>
+      <div class="bloque-titulo"><h2>Datos</h2>
+        ${editor() ? `<button type="button" class="lapiz" id="editar-datos" aria-label="Editar datos" title="Editar datos"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m13.5 6.5 4 4" stroke="currentColor" stroke-width="1.8"/></svg></button>` : ""}</div>
+      <div id="datos-cuerpo"><dl class="datos">${datos.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v ?? "—") || "—"}</dd>`).join("")}</dl></div>
       ${editor() ? `<label class="form" style="margin-top:10px">Situación
         <select id="cambiar-estado">${opciones}</select></label>
         <p class="nota" style="margin-top:6px">Pasá a "En obra" cuando arranca. El fin se marca con su hito.</p>` : ""}
@@ -891,6 +994,8 @@ function pintarFicha(tipo, o, hitos, notas) {
       await abrirFicha(tipo, o.id);
     } catch (e) { aviso(e.message, true); b.disabled = false; }
   };
+  const ed = $("#editar-datos", ficha);
+  if (ed) ed.onclick = () => editarDatos(tipo, o);
   const ce = $("#cambiar-estado", ficha);
   if (ce) ce.onchange = async () => {
     try {

@@ -26,7 +26,7 @@ Desde la web: **Usuarios** (botón arriba, solo para administradores).
 
 Los SQL están en `sql/`, en el orden en que se corrieron en Neon. Para la pantalla de usuarios hace
 falta `sql/parte3_admin_usuarios.sql`; para agregar puntos, `sql/parte4_puntos_nuevos.sql`; para la capa
-Relevamiento, `sql/parte5_relevamiento.sql`. Después de cada uno: *Data API > Refresh schema cache*.
+Relevamiento, `sql/parte5_relevamiento.sql`; para editar los datos de una ficha, `sql/parte6_editar_datos.sql`. Después de cada uno: *Data API > Refresh schema cache*.
 
 ## Archivos
 

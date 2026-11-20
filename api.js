@@ -64,6 +64,9 @@ async function crearNeon() {
     async cambiarEstado(tipo, id, valor) {
       chequear(await neon.from(TABLA[tipo]).update({ [CAMPO_ESTADO[tipo]]: valor }).eq("fid", id), "Cambiar estado");
     },
+    async guardarDatos(tipo, id, cambios) {
+      chequear(await neon.from(TABLA[tipo]).update(cambios).eq("fid", id), "Guardar datos");
+    },
     async adminUsuarios() { return chequear(await neon.rpc("admin_usuarios"), "Usuarios"); },
     async crearPunto(capa, lat, lon, datos) {
       return chequear(await neon.rpc("crear_punto", { p_capa: capa, p_lat: lat, p_lon: lon, p_datos: datos }), "Agregar punto");
@@ -200,6 +203,15 @@ function crearDemo() {
     },
     async agregarNota(t, id, nota) { cuaderno.push({ id: cid++, [clave(t)]: id, ...nota }); },
     async cambiarEstado(t, id, v) { lista(t).find((x) => x.id === id).estado = v; },
+    async guardarDatos(t, id, cambios) {
+      await espera();
+      const campo = { ESTRUCTURA: "estructura", "LICITACIÓN": "licitacion", "AÑO": "anio", "D.O.": "director_obra",
+        "FECHA INICIO": "fecha_inicio", "FECHA FIN": "fecha_fin", "RECEPCIÓN": "recepcion", PLANOS: "planos",
+        OBSERVACIONES: "observaciones", Sala: "sala", Localidad: "localidad", Departamento: "departamento",
+        "Licitación": "licitacion", Tarea: "tarea", "Descripción": "descripcion", Planos: "planos" };
+      const o = lista(t).find((x) => x.id === id);
+      for (const [k, v] of Object.entries(cambios)) o[campo[k]] = v;
+    },
   };
 }
 
