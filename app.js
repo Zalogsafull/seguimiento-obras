@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-25";
+import { crearApi } from "./api.js?v=2026-11-20-26";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -75,15 +75,20 @@ const HITO_TRAMO = { aprobado_e: 2, aprobado_o: 2, hormigonado: 3, montaje: 4, i
 // Estructuras terminadas: pueden estar en dos capas a la vez, como en QGIS.
 //  - Recepciones: todas las que no tienen la definitiva, según cuánto falta para el vencimiento.
 //  - Terminadas: todas, según la recepción que tengan (con o sin fecha de fin).
+// Códigos del campo RECEPCIÓN: RD definitiva; PD (rev. pre definitiva) y PR (para recepcionar)
+// también se cuentan como definitiva; RP provisoria.
+const codRecepcion = (o) => String(o.recepcion ?? "").trim().toUpperCase();
+const conDefinitiva = (o) => ["RD", "PD", "PR"].includes(codRecepcion(o)) || (o.etapa || 1) >= 6;
+const conProvisoria = (o) => codRecepcion(o) === "RP";
 function categoriaRecepcion(o) {
-  if (o.recepcion === "RD" || (o.etapa || 1) >= 6) return null;
+  if (conDefinitiva(o)) return null;
   const d = o.dias_para_recepcion;
   if (d == null) return null; // sin fecha de fin no se puede calcular: solo queda en Terminadas
   return d < 0 ? "vencida" : d < 90 ? "r3" : d < 180 ? "r6" : "plazo";
 }
 function categoriaTerminada(o) {
-  if (o.recepcion === "RD" || (o.etapa || 1) >= 6) return "recibida";
-  return o.recepcion === "RP" ? "provisoria" : "sinrecep";
+  if (conDefinitiva(o)) return "recibida";
+  return conProvisoria(o) ? "provisoria" : "sinrecep";
 }
 const terminadaEst = (tipo, o) => tipo === "estructura" && (o.estado === "FIN" || (o.etapa || 1) >= 5);
 
@@ -967,7 +972,7 @@ function armadoInforme(id) {
       : porVencimiento),
     cols: ["Código", "Estructura", "Licitación", "D.O.", "Fin de obra", "Vence la recepción", "Situación", "Recepción hecha"],
     fila: (o) => [o.codigo, o.estructura, o.licitacion, o.director_obra, fecha(o.fecha_fin), fecha(o.vence_recepcion), situacionRecepcion(o),
-      o.recepcion === "RD" ? "Definitiva" : o.recepcion === "RP" ? "Provisoria" : "Ninguna"],
+      conDefinitiva(o) ? "Definitiva" : conProvisoria(o) ? "Provisoria" : "Ninguna"],
     anchos: { 7: { fontStyle: "bold" } } };
   if (id === "est_todas") return { ...porEtapa,
     cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin", "Recepción", "Hitos hechos"],
