@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-16";
+import { crearApi } from "./api.js?v=2026-11-20-17";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -63,6 +63,8 @@ const ESCALERA = {
   obra: ["proyecto", "aprobado_o", "infra", "terminada"],
 };
 const NOMBRE_TRAMO = { recepcion: "Esperando recepción" };
+// Qué hito completa cada tramo de la barra (por su etapa), para pintar los hechos fuera de orden
+const HITO_TRAMO = { aprobado_e: 2, aprobado_o: 2, hormigonado: 3, montaje: 4, infra: 5, recibida: 6 };
 
 function categoria(tipo, o) {
   const e = o.estado, et = o.etapa || 1;
@@ -1149,7 +1151,12 @@ async function abrirFicha(tipo, id) {
     const [o, hitos, notas] = await conTiempo(Promise.all([S.api.una(tipo, id), S.api.hitos(tipo, id), S.api.cuaderno(tipo, id)]), 20000);
     const lista = S.datos[tipo];
     const i = lista.findIndex((x) => x.id === id);
-    if (i >= 0) { lista[i] = o; guardarDatos(); }
+    if (i >= 0) {
+      const cambio = JSON.stringify(lista[i]) !== JSON.stringify(o);
+      lista[i] = o;
+      guardarDatos();
+      if (cambio) pintar(false);
+    }
     guardarFicha(tipo, id, o, hitos || [], notas || []);
     if (!sigue()) return;
     if (g && JSON.stringify([g.o, g.hitos, g.notas]) === JSON.stringify([o, hitos || [], notas || []])) return;
@@ -1178,9 +1185,11 @@ function pintarFicha(tipo, o, hitos, notas) {
   const pasos = ESCALERA[tipo];
   const clave = ["r6", "r3", "vencida", "plazo", "sinfecha"].includes(cat) ? "recepcion" : cat === "terminada" ? "terminada" : cat;
   const pos = Math.max(0, pasos.indexOf(clave));
+  const hechas = new Set((hitos || []).filter((h) => h.estado === "HECHO" && h.etapa).map((h) => h.etapa));
   const tramos = pasos.map((p, i) => {
     const col = CAT[p]?.color || c.color;
-    const cls = i < pos ? "tramo hecho" : i === pos ? "tramo actual" : "tramo";
+    // ej.: infraestructura terminada antes del montaje: el tramo verde queda lleno aunque la obra esté en montaje
+    const cls = i < pos ? "tramo hecho" : i === pos ? "tramo actual" : hechas.has(HITO_TRAMO[p]) ? "tramo hecho" : "tramo";
     return `<span class="${cls}" style="--c:${i === pos ? c.color : col}" title="${esc(CAT[p]?.nombre || NOMBRE_TRAMO[p])}"></span>`;
   }).join("");
   const detalle = tipo === "estructura" && (c.recepcion || cat === "plazo") && o.dias_para_recepcion != null
