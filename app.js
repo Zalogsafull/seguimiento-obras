@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-13";
+import { crearApi } from "./api.js?v=2026-11-20-14";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1088,7 +1088,7 @@ function pintarFicha(tipo, o, hitos, notas) {
       <div id="datos-cuerpo"><dl class="datos">${datos.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v ?? "—") || "—"}</dd>`).join("")}</dl></div>
       ${editor() ? `<label class="form" style="margin-top:10px">Situación
         <select id="cambiar-estado">${opciones}</select></label>
-        <p class="nota" style="margin-top:6px">Pasá a "En obra" cuando arranca. El fin se marca con su hito.</p>` : ""}
+        <p class="nota" style="margin-top:6px">${tipo === "estructura" ? 'Pasa sola a "En obra" al marcar el hito Implantación, y a "Terminada" con infraestructura, hormigonado y montaje hechos.' : 'Pasá a "En obra" cuando arranca. El fin se marca con su hito.'}</p>` : ""}
     </div>`;
 
   enlazarCerrar(ficha, cerrarFicha);

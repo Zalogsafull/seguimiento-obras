@@ -120,10 +120,10 @@ function crearDemo() {
       licitacion: "L-19", tarea: "Energía", descripcion: "OBRA", director_obra: "J.P.", planos: null,
       lat: -34.48, lon: -54.33, hitos_hechos: 1, hitos_total: 2, proximo_vencimiento: null },
   ];
-  const plant = { estructura: ["Proyecto ejecutivo realizado y aprobado", "Hormigonado", "Estructura montada",
+  const plant = { estructura: ["Proyecto ejecutivo realizado y aprobado", "Implantación (inicio de obra)", "Hormigonado", "Estructura montada",
     "Infraestructura terminada (fin de obra)", "Recepción provisoria", "Recepción definitiva"],
     obra: ["Proyecto aprobado", "Infraestructura terminada (fin de obra)"] };
-  const etapaDe = { estructura: [2, 3, 4, 5, null, 6], obra: [2, 5] };
+  const etapaDe = { estructura: [2, null, 3, 4, 5, null, 6], obra: [2, 5] };
   const relev = [
     { id: 1, codigo: "P1", descripcion: "Poste de UTE frente al predio", z: "38.42", lat: -34.8812, lon: -56.1765 },
     { id: 2, codigo: "P2", descripcion: "Esquina del cerco", z: "37.95", lat: -34.8806, lon: -56.1781 },
@@ -135,7 +135,8 @@ function crearDemo() {
     for (const o of lista) {
       plant[tipo].forEach((nombre, i) => {
         const et = etapaDe[tipo][i];
-        const hecho = et != null && et <= o.etapa && !(et === 2 && o.etapa === 1);
+        const hecho = /^Implantaci/.test(nombre) ? o.estado !== "PROY"
+          : et != null && et <= o.etapa && !(et === 2 && o.etapa === 1);
         hitos.push({ id: hid++, [tipo === "estructura" ? "estructura_id" : "obra_id"]: o.id, orden: (i + 1) * 10, nombre,
           etapa: et, estado: hecho ? "HECHO" : "PENDIENTE", fecha_real: hecho ? dia(-30 * (6 - i)) : null,
           fecha_prevista: null, recordatorio: null, notas: null });
