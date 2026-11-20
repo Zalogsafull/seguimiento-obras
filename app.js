@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-8";
+import { crearApi } from "./api.js?v=2026-11-20-9";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -499,7 +499,7 @@ function pintarCapas() {
     </div>`;
   }).join("");
   const p = $("#panel-capas");
-  p.innerHTML = `${referencias()}${html}
+  p.innerHTML = `${html}
 
     ${filtrosActivos() ? `<p class="nota aviso-filtro">Hay ${filtrosActivos()} filtro${filtrosActivos() > 1 ? "s" : ""} activo${filtrosActivos() > 1 ? "s" : ""}: las cantidades ya los tienen en cuenta.</p>` : ""}`;
   p.querySelectorAll('[data-medio="true"]').forEach((el) => (el.indeterminate = true));
@@ -696,21 +696,24 @@ function pintarAjustes() {
     : "Todavía no hay datos guardados.";
 }
 
-// Referencias: qué quiere decir cada forma y cada borde (como la leyenda de QGIS).
-function referencias() {
-  const f = (tp, o, nm) => `<span>${svgForma(forma(tp, o), "#ffffff", "#7a7a7a", forma(tp, o) === "asterisco" ? 16 : 13)}${nm}</span>`;
-  return `<div class="referencias" aria-label="Referencias">
-    <p class="ref-titulo">Referencias</p>
-    <div class="formas">
+// ------------------------------------------------------------ referencias (la leyenda, como en QGIS)
+function pintarReferencias() {
+  const f = (tp, o, nm) => `<li>${svgForma(forma(tp, o), "#ffffff", "#7a7a7a", forma(tp, o) === "asterisco" ? 17 : 14)}<span>${nm}</span></li>`;
+  const c = (cat, tp = "estructura", o = { estructura: "MONOPOLO" }) => `<li>${simbolo(tp, o, cat, 0.95)}<span>${esc(CAT[cat].nombre)}</span></li>`;
+  const linea = '<svg width="18" height="12" viewBox="0 0 18 12" aria-hidden="true"><path d="M1 9 6 3l5 5 6-6" fill="none" stroke="#9a9a9a" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+  $("#panel-referencias").innerHTML = `
+    <section class="ajustes-bloque"><h3>Formas</h3><ul class="leyenda">
       ${f("estructura", { estructura: "MÁSTIL" }, "Mástil")}${f("estructura", { estructura: "MONOPOLO" }, "Monopolo")}
-      ${f("obra", { descripcion: "OBRA" }, "Obra")}${f("obra", { descripcion: "COSITIO" }, "Cositio")}
-    </div>
-    <div class="formas">
-      <span>${svgForma("circulo", "#f2d024", "#e0c200", 17, 1.8)}Borde amarillo: espera recepción</span>
-      <span>${svgForma("circulo", "#838383", "#1a1a1a", 13)}Gris: terminada</span>
-    </div>
-    <p class="nota" style="margin:4px 0 0">El color es la etapa: blanco proyecto, celeste aprobado, rojo hormigonado, amarillo montaje, verde infraestructura.</p>
-  </div>`;
+      ${f("obra", { descripcion: "OBRA" }, "Obra")}${f("obra", { descripcion: "COSITIO" }, "Cositio")}</ul></section>
+    <section class="ajustes-bloque"><h3>Etapa de la obra (color)</h3><ul class="leyenda">
+      ${c("proyecto")}${c("aprobado_e")}${c("hormigonado")}${c("montaje")}${c("infra")}</ul>
+      <p class="nota" style="margin:8px 0 0">En la capa Obras solo hay Proyecto, Proyecto aprobado y Obra de infraestructura.</p></section>
+    <section class="ajustes-bloque"><h3>Recepción (borde amarillo, más grande)</h3><ul class="leyenda">
+      ${c("r6")}${c("r3")}${c("vencida")}</ul></section>
+    <section class="ajustes-bloque"><h3>Terminadas (borde oscuro)</h3><ul class="leyenda">
+      ${c("plazo")}${c("recibida")}</ul></section>
+    <section class="ajustes-bloque"><h3>Capas de utilidad</h3><ul class="leyenda">
+      <li>${svgRelev(11)}<span>Relevamiento</span></li><li>${linea}<span>Límites de departamentos</span></li></ul></section>`;
 }
 
 // ------------------------------------------------------------ capas de utilidad
@@ -794,6 +797,7 @@ function pintarPanel(rehacerFiltros = true) {
   if (S.tab === "venc") pintarVencimientos();
   if (UI.modo === "ajustes") pintarAjustes();
   if (UI.modo === "utilidad") pintarUtilidad();
+  if (UI.modo === "referencias") pintarReferencias();
   return v;
 }
 
@@ -1213,11 +1217,11 @@ function aplicarUI() {
   raiz.setProperty("--panel-ancho", movil.matches ? "100%" : UI.ancho + "px");
   raiz.setProperty("--hoja", UI.alto + "px");
   app.classList.toggle("plegado", UI.plegado);
-  if (!["capas", "utilidad", "ajustes"].includes(UI.modo)) UI.modo = "capas";
+  if (!["capas", "utilidad", "ajustes", "referencias"].includes(UI.modo)) UI.modo = "capas";
   const otro = UI.modo !== "capas";
   $("#pestanas").hidden = otro;
   $("#titulo-panel").hidden = !otro;
-  $("#titulo-panel").textContent = UI.modo === "ajustes" ? "Ajustes" : "Capas de utilidad";
+  $("#titulo-panel").textContent = { ajustes: "Ajustes", utilidad: "Capas de utilidad", referencias: "Referencias" }[UI.modo] || "";
   document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = d.dataset.panel !== (otro ? UI.modo : S.tab)));
   document.querySelectorAll(".ctrl-paneles a").forEach((a) => {
     const on = !UI.plegado && a.dataset.modo === UI.modo;
@@ -1240,11 +1244,13 @@ function abrirModo(modo) {
   UI.modo = modo;
   UI.plegado = false;
   guardarUI(); aplicarUI();
-  if (modo === "ajustes") pintarAjustes(); else if (modo === "utilidad") pintarUtilidad(); else pintarPanel();
+  if (modo === "ajustes") pintarAjustes(); else if (modo === "utilidad") pintarUtilidad();
+  else if (modo === "referencias") pintarReferencias(); else pintarPanel();
 }
 function agregarBotonesPaneles() {
   const ICONOS = {
     utilidad: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 21s-6-5.6-6-10.4a6 6 0 0 1 12 0C18 15.4 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.2 10.6h5.6M12 7.8v5.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    referencias: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M5 4.5 8 9.5H2zM20.5 6.8h-9.5M20.5 12.3h-9.5M20.5 17.8h-9.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5" cy="12.3" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="3" y="15.8" width="4" height="4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
     capas: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3.5 21 8l-9 4.5L3 8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m3 12 9 4.5 9-4.5M3 16l9 4.5 9-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
     ajustes: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M10.3 2.8h3.4l.5 2.6 1.6.9 2.5-.9 1.7 2.9-2 1.8v1.8l2 1.8-1.7 2.9-2.5-.9-1.6.9-.5 2.6h-3.4l-.5-2.6-1.6-.9-2.5.9-1.7-2.9 2-1.8v-1.8l-2-1.8 1.7-2.9 2.5.9 1.6-.9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
   };
@@ -1252,7 +1258,7 @@ function agregarBotonesPaneles() {
     options: { position: "topleft" },
     onAdd() {
       const div = L.DomUtil.create("div", "leaflet-bar ctrl-paneles");
-      for (const [modo, titulo] of [["capas", "Capas de obra: capas, filtros, lista y vencimientos"], ["utilidad", "Capas de utilidad: relevamiento y departamentos"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"]]) {
+      for (const [modo, titulo] of [["capas", "Capas de obra: capas, filtros, lista y vencimientos"], ["utilidad", "Capas de utilidad: relevamiento y departamentos"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"], ["referencias", "Referencias: qué quiere decir cada símbolo"]]) {
         const a = L.DomUtil.create("a", "", div);
         a.href = "#"; a.role = "button"; a.dataset.modo = modo; a.title = titulo; a.setAttribute("aria-label", titulo);
         a.innerHTML = ICONOS[modo];

@@ -357,3 +357,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ref-titulo { margin: 0 0 6px; font: 600 13px/1.2 var(--cond); color: var(--tinta-suave); letter-spacing: .02em; }
 .referencias .formas { padding: 2px 0; gap: 6px 16px; color: var(--tinta); }
 .referencias .formas + .formas { margin-top: 4px; }
+
+.leyenda { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 14px; }
+.leyenda li { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--tinta); }
+.leyenda svg { flex: none; }
