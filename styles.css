@@ -300,3 +300,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .medida { left: 56px; right: 10px; transform: none; max-width: none; flex-wrap: wrap; gap: 6px 10px; }
   .medida-botones { margin-left: auto; }
 }
+
+/* Datos guardados / sin conexión */
+.estado-datos { position: absolute; z-index: 800; top: 10px; right: 10px; max-width: calc(100% - 80px); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--linea); background: rgba(44,44,44,.94); color: var(--tinta-suave); font: 500 12.5px/1.2 var(--texto, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 2px 8px rgba(0,0,0,.4); cursor: default; }
+.estado-datos[data-modo="sinred"] { color: #F2C14E; border-color: #6B5A2A; cursor: pointer; }
+.estado-datos[data-modo="actualizando"]::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--acento); vertical-align: 1px; animation: latido 1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .estado-datos::before { animation: none !important; } }
+.mapa-zona:has(.medida) .estado-datos { top: 112px; }

@@ -146,17 +146,21 @@ function crearDemo() {
     { user_id: "demo", email: "dtdoici@gmail.com", nombre_cuenta: "G.S.", registrado: dia(-10), nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true, habilitado: true },
     { user_id: "u-ana", email: "ana@ejemplo.com", nombre_cuenta: "Ana", registrado: dia(-6), nombre: "Ana", rol: "LECTOR", iniciales_do: "A.R.", admin: false, habilitado: true },
   ];
+  // en la demostración la sesión queda guardada en el navegador, como en la versión real
   let sesion = null;
-  const espera = () => new Promise((r) => setTimeout(r, 120));
+  try { sesion = JSON.parse(localStorage.getItem("obras-oici-demo-sesion") || "null"); } catch (e) { /* sin almacenamiento */ }
+  const recordar = (v) => { try { v ? localStorage.setItem("obras-oici-demo-sesion", JSON.stringify(v)) : localStorage.removeItem("obras-oici-demo-sesion"); } catch (e) { /* nada */ } };
+  // sin conexión la demostración falla igual que la versión real
+  const espera = () => new Promise((r, no) => setTimeout(() => (navigator.onLine ? r() : no(new Error("Failed to fetch"))), 120));
   return {
     demo: true,
-    async usuario() { return sesion; },
-    async entrar(email) { await espera(); sesion = { id: "demo", email, name: "Gonza" }; return sesion; },
+    async usuario() { await espera(); return sesion; },
+    async entrar(email) { await espera(); sesion = { id: "demo", email, name: "Gonza" }; recordar(sesion); return sesion; },
     async crearCuenta(email, p, name) { return this.entrar(email, p, name); },
-    async salir() { sesion = null; },
+    async salir() { sesion = null; recordar(null); },
     async pedirReseteo() { await espera(); },
     async nuevaContrasena() { await espera(); },
-    async perfil() { return { user_id: "demo", nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true }; },
+    async perfil() { await espera(); return { user_id: "demo", nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true }; },
     async adminUsuarios() { await espera(); return structuredClone(cuentas); },
     async crearPunto(capa, lat, lon, d) {
       await espera();
@@ -187,9 +191,9 @@ function crearDemo() {
     async estructuras() { await espera(); return structuredClone(est); },
     async obras() { await espera(); return structuredClone(obr); },
     async relevamiento() { await espera(); return structuredClone(relev); },
-    async una(t, id) { return structuredClone(lista(t).find((x) => x.id === id)); },
-    async hitos(t, id) { return structuredClone(hitos.filter((h) => h[clave(t)] === id)); },
-    async cuaderno(t, id) { return structuredClone(cuaderno.filter((c) => c[clave(t)] === id).reverse()); },
+    async una(t, id) { await espera(); return structuredClone(lista(t).find((x) => x.id === id)); },
+    async hitos(t, id) { await espera(); return structuredClone(hitos.filter((h) => h[clave(t)] === id)); },
+    async cuaderno(t, id) { await espera(); return structuredClone(cuaderno.filter((c) => c[clave(t)] === id).reverse()); },
     async marcarHito(id, cambios) {
       const h = hitos.find((x) => x.id === id); Object.assign(h, cambios);
       recalcular(h.estructura_id ? "estructura" : "obra", h.estructura_id || h.obra_id);

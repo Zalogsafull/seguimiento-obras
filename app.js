@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-3";
+import { crearApi } from "./api.js?v=2026-11-20-4";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -92,6 +92,8 @@ const fecha = (iso) => (iso ? new Date(iso + "T12:00:00").toLocaleDateString("es
 const normal = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 function aviso(texto, mal = false) {
+  if (mal && /failed to fetch|networkerror|load failed|err_|se agotó el tiempo/i.test(texto))
+    texto = "Sin conexión: no se pudo completar. Probá de nuevo cuando tengas señal.";
   const d = document.createElement("div");
   d.className = "aviso" + (mal ? " mal" : "");
   d.textContent = texto;
@@ -173,12 +175,73 @@ function visibles() {
       || String(a.o.codigo).localeCompare(String(b.o.codigo)));
 }
 
+// ------------------------------------------------------------ datos guardados en este dispositivo
+// La web abre al instante con lo último que se vio y después se actualiza; sin señal sigue
+// mostrando lo guardado. Al tocar Salir se borra todo.
+const DEMO = new URLSearchParams(location.search).has("demo");
+const CLAVE_DATOS = "obras-oici-datos-v1" + (DEMO ? "-demo" : "");
+const CLAVE_FICHAS = "obras-oici-fichas-v1" + (DEMO ? "-demo" : "");
+const CLAVE_VISTA = "obras-oici-vista-v1";
+const leerJSON = (k) => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
+const escribirJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } };
+function guardarDatos() {
+  if (!S.usuario?.email || !S.perfil) return;
+  escribirJSON(CLAVE_DATOS, { email: S.usuario.email, perfil: S.perfil, datos: S.datos, relevFalta: !!S.relevFalta, cuando: S.datosDe || Date.now() });
+}
+function borrarGuardado() {
+  try { localStorage.removeItem(CLAVE_DATOS); localStorage.removeItem(CLAVE_FICHAS); } catch (e) { /* nada guardado */ }
+}
+const fichaGuardada = (tipo, id) => (leerJSON(CLAVE_FICHAS) || {})[`${tipo}:${id}`] || null;
+function guardarFicha(tipo, id, o, hitos, notas) {
+  const k = `${tipo}:${id}`, t = leerJSON(CLAVE_FICHAS) || {};
+  t[k] = { o, hitos, notas, cuando: Date.now() };
+  for (const v of Object.keys(t).sort((a, b) => t[b].cuando - t[a].cuando).slice(120)) delete t[v];
+  if (!escribirJSON(CLAVE_FICHAS, t)) escribirJSON(CLAVE_FICHAS, { [k]: t[k] });
+}
+const sinRed = (e) => !navigator.onLine || /fetch|network|load failed|err_|se agotó el tiempo/i.test(String(e?.message || e));
+const conTiempo = (pr, ms) => Promise.race([pr,
+  new Promise((_, no) => setTimeout(() => no(new Error("Se agotó el tiempo de espera de la conexión")), ms))]);
+function cuandoTexto(ms) {
+  const d = new Date(ms), hora = d.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return new Date().toDateString() === d.toDateString() ? `de las ${hora}`
+    : `del ${d.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit" })}, ${hora}`;
+}
+// Cartelito arriba a la derecha del mapa: "Actualizando…" o "Sin conexión · datos de las 07:31".
+function estadoDatos(modo) {
+  S.estadoRed = modo;
+  const el = $("#estado-datos");
+  if (!el) return;
+  el.hidden = !modo;
+  el.dataset.modo = modo || "";
+  el.textContent = modo === "actualizando" ? "Actualizando…"
+    : modo === "sinred" ? `Sin conexión · datos ${cuandoTexto(S.datosDe || Date.now())}` : "";
+  el.title = modo === "sinred" ? "Tocá para reintentar" : "";
+}
+async function salirCuenta() {
+  try { await S.api?.salir(); } catch (e) { /* sin conexión: igual se borra lo guardado */ }
+  borrarGuardado();
+  location.reload();
+}
+
 // ------------------------------------------------------------ vistas
 function mostrar(vista) {
   for (const id of ["vista-ingreso", "vista-pendiente", "vista-app"]) $("#" + id).hidden = id !== vista;
 }
 
 async function iniciar() {
+  const guardado = new URLSearchParams(location.search).get("token") ? null : leerJSON(CLAVE_DATOS);
+  if (guardado?.perfil && guardado.datos && guardado.email) {
+    // Abre al instante con lo último que se vio y después busca lo nuevo.
+    S.usuario = { email: guardado.email };
+    S.perfil = guardado.perfil;
+    S.datos = { estructura: [], obra: [], relev: [], ...guardado.datos };
+    S.relevFalta = guardado.relevFalta;
+    S.datosDe = guardado.cuando;
+    mostrarApp();
+    pintar();
+    await actualizar();
+    return;
+  }
   try {
     S.api = await crearApi();
     S.usuario = await S.api.usuario();
@@ -279,7 +342,7 @@ function prepararIngreso() {
       }
     };
   }
-  const salir = async () => { await S.api.salir(); location.reload(); };
+  const salir = salirCuenta;
   $("#salir").onclick = salir;
   $("#salir-pendiente").onclick = salir;
 }
@@ -302,39 +365,107 @@ async function entrarApp() {
     $("#correo-pendiente").textContent = S.usuario?.email || "";
     return mostrar("vista-pendiente");
   }
-  mostrar("vista-app");
-  $("#nombre-usuario").textContent = S.perfil.nombre + (editor() ? "" : " · solo lectura");
-  $("#boton-usuarios").hidden = !S.perfil.admin;
-  $("#boton-nuevo").hidden = !editor();
-  $("#boton-nuevo").onclick = abrirNuevo;
-  $("#boton-usuarios").onclick = abrirAdmin;
-  $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
-  prepararMapa();
-  prepararPanel();
+  // si entra otra persona en este dispositivo, no se mezclan los datos guardados
+  const g = leerJSON(CLAVE_DATOS);
+  if (g && g.email !== S.usuario?.email) borrarGuardado();
+  S.verificado = true;
+  mostrarApp();
   await cargar();
 }
 
-async function cargar() {
+function ponerUsuario() {
+  $("#nombre-usuario").textContent = S.perfil.nombre + (editor() ? "" : " · solo lectura");
+  $("#boton-usuarios").hidden = !S.perfil.admin;
+  $("#boton-nuevo").hidden = !editor();
+}
+
+function mostrarApp() {
+  mostrar("vista-app");
+  ponerUsuario();
+  if (S.appLista) return;
+  S.appLista = true;
+  $("#boton-nuevo").onclick = abrirNuevo;
+  $("#boton-usuarios").onclick = abrirAdmin;
+  $("#salir").onclick = salirCuenta;
+  $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
+  $("#estado-datos").onclick = () => { if (S.estadoRed === "sinred") actualizar(); };
+  prepararMapa();
+  prepararPanel();
+  const v = leerJSON(CLAVE_VISTA);
+  if (v?.tab && v.tab !== S.tab && document.querySelector(`[data-tab="${v.tab}"]`)) verTab(v.tab);
+  // al volver la señal, o al volver a la app después de un rato, se actualiza sola
+  addEventListener("online", () => actualizar());
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && Date.now() - (S.datosDe || 0) > 5 * 60e3) actualizar();
+  });
+}
+
+// Revisa la sesión (si arrancó con lo guardado) y trae los datos nuevos.
+async function actualizar() {
+  if (S.actualizando) return;
+  S.actualizando = true;
   try {
-    const [e, o] = await Promise.all([S.api.estructuras(), S.api.obras()]);
+    estadoDatos("actualizando");
+    if (!S.api) {
+      try { S.api = await conTiempo(crearApi(), 20000); prepararIngreso(); }
+      catch (e) { S.api = null; return estadoDatos("sinred"); }
+    }
+    if (!S.verificado) {
+      let u;
+      try { u = await conTiempo(S.api.usuario(), 20000); } catch (e) { return estadoDatos("sinred"); }
+      if (!u) {
+        if (!navigator.onLine) return estadoDatos("sinred");
+        estadoDatos(null);
+        return mostrar("vista-ingreso"); // la sesión venció: hay que volver a ingresar
+      }
+      if (u.email !== S.usuario.email) { borrarGuardado(); location.reload(); return; }
+      S.usuario = u;
+      let p;
+      try { p = await conTiempo(S.api.perfil(), 20000); } catch (e) { return estadoDatos("sinred"); }
+      if (!p) { borrarGuardado(); location.reload(); return; } // le quitaron el acceso
+      S.perfil = p;
+      S.verificado = true;
+      ponerUsuario();
+    }
+    await cargar();
+  } finally {
+    S.actualizando = false;
+  }
+}
+
+async function cargar() {
+  const habia = S.datos.estructura.length || S.datos.obra.length;
+  estadoDatos("actualizando");
+  try {
+    const [e, o] = await conTiempo(Promise.all([S.api.estructuras(), S.api.obras()]), 30000);
     S.datos.estructura = e || [];
     S.datos.obra = o || [];
   } catch (e) {
-    aviso("No se pudieron cargar las obras: " + e.message, true);
+    // sin señal: se siguen mostrando los datos guardados
+    estadoDatos(sinRed(e) ? "sinred" : null);
+    if (!(habia && sinRed(e))) aviso("No se pudieron cargar las obras: " + e.message, true);
+    pintar();
+    return;
   }
   try {
-    S.datos.relev = (await S.api.relevamiento()) || [];
+    S.datos.relev = (await conTiempo(S.api.relevamiento(), 20000)) || [];
     S.relevFalta = false;
   } catch (e) {
-    S.datos.relev = [];
-    S.relevFalta = true; // falta correr sql/parte5_relevamiento.sql
+    if (!sinRed(e)) {
+      S.datos.relev = [];
+      S.relevFalta = true; // falta correr sql/parte5_relevamiento.sql
+    }
   }
+  S.datosDe = Date.now();
+  guardarDatos();
+  estadoDatos(null);
   pintar();
 }
 
 // ------------------------------------------------------------ pestañas
 function verTab(t) {
   S.tab = t;
+  escribirJSON(CLAVE_VISTA, { ...(leerJSON(CLAVE_VISTA) || {}), tab: t });
   document.querySelectorAll("#pestanas [data-tab]").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === t));
   document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = d.dataset.panel !== t));
   pintarPanel();
@@ -522,13 +653,19 @@ function prepararMapa() {
   agregarBotonUbicacion();
   agregarBotonMedir();
   leerEstado();
+  const vista = leerJSON(CLAVE_VISTA);
+  if (vista?.centro && vista.zoom) { S.mapa.setView(vista.centro, vista.zoom, { animate: false }); S.primeraVez = false; }
+  S.mapa.on("moveend", () => {
+    const c = S.mapa.getCenter();
+    escribirJSON(CLAVE_VISTA, { ...(leerJSON(CLAVE_VISTA) || {}), centro: [c.lat, c.lng], zoom: S.mapa.getZoom() });
+  });
   // Gris como QGIS: calles en escala de grises invertida, muy atenuadas sobre el gris #212121.
   S.base["Gris (como QGIS)"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "© OpenStreetMap", className: "tiles-gris", opacity: S.callesGris });
+    maxZoom: 19, attribution: "© OpenStreetMap", className: "tiles-gris", opacity: S.callesGris, crossOrigin: "anonymous" });
   S.base["Calles"] = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "© OpenStreetMap" });
+    maxZoom: 19, attribution: "© OpenStreetMap", crossOrigin: "anonymous" });
   S.base["Satélite"] = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 19, attribution: "Imágenes © Esri" });
+    maxZoom: 19, attribution: "Imágenes © Esri", crossOrigin: "anonymous" });
   if (!S.base[S.baseNombre]) S.baseNombre = "Gris (como QGIS)";
   S.base[S.baseNombre].addTo(S.mapa);
   $("#mapa").classList.toggle("fondo-oscuro", S.baseNombre.startsWith("Gris"));
@@ -613,19 +750,37 @@ async function abrirFicha(tipo, id) {
   S.abierta = { tipo, id };
   const ficha = $("#ficha");
   ficha.hidden = false;
-  ficha.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver a la lista")}<p class="tipo-obra">Cargando…</p></div>`;
-  enlazarCerrar(ficha, cerrarFicha);
+  const g = fichaGuardada(tipo, id);
+  const base = S.datos[tipo].find((x) => x.id === id);
+  if (g) pintarFicha(tipo, g.o, g.hitos, g.notas);
+  else {
+    ficha.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver a la lista")}<p class="tipo-obra">Cargando…</p></div>`;
+    enlazarCerrar(ficha, cerrarFicha);
+  }
   pintar();
+  const m = S.marcadores.get(`${tipo}:${id}`);
+  if (m && window.innerWidth > 760) S.mapa.panTo(m.getLatLng());
+  const sigue = () => S.abierta && S.abierta.tipo === tipo && S.abierta.id === id;
   try {
-    const [o, hitos, notas] = await Promise.all([S.api.una(tipo, id), S.api.hitos(tipo, id), S.api.cuaderno(tipo, id)]);
+    if (!S.api) throw new Error("Failed to fetch");
+    const [o, hitos, notas] = await conTiempo(Promise.all([S.api.una(tipo, id), S.api.hitos(tipo, id), S.api.cuaderno(tipo, id)]), 20000);
     const lista = S.datos[tipo];
     const i = lista.findIndex((x) => x.id === id);
-    if (i >= 0) lista[i] = o;
+    if (i >= 0) { lista[i] = o; guardarDatos(); }
+    guardarFicha(tipo, id, o, hitos || [], notas || []);
+    if (!sigue()) return;
+    if (g && JSON.stringify([g.o, g.hitos, g.notas]) === JSON.stringify([o, hitos || [], notas || []])) return;
+    // se repinta sin perder lo que estabas escribiendo en el cuaderno
+    const borrador = $("#form-nota textarea", ficha)?.value, alto = ficha.scrollTop;
     pintarFicha(tipo, o, hitos || [], notas || []);
-    const m = S.marcadores.get(`${tipo}:${id}`);
-    if (m && window.innerWidth > 760) S.mapa.panTo(m.getLatLng());
+    if (borrador) $("#form-nota textarea", ficha).value = borrador;
+    ficha.scrollTop = alto;
   } catch (e) {
-    aviso("No se pudo abrir la obra: " + e.message, true);
+    if (!sigue()) return;
+    if (sinRed(e)) {
+      if (!g && base) pintarFicha(tipo, base, null, null);
+      estadoDatos("sinred");
+    } else aviso("No se pudo abrir la obra: " + e.message, true);
   }
 }
 
@@ -676,7 +831,8 @@ function pintarFicha(tipo, o, hitos, notas) {
 
     <div class="ficha-bloque">
       <h2>Hitos</h2>
-      ${hitos.length ? hitos.map((h) => hitoHtml(h)).join("") : `<p class="nota">Esta obra no tiene hitos cargados.</p>`}
+      ${hitos == null ? `<p class="nota">Sin conexión: los hitos se ven cuando vuelva la señal.</p>`
+        : hitos.length ? hitos.map((h) => hitoHtml(h)).join("") : `<p class="nota">Esta obra no tiene hitos cargados.</p>`}
       ${editor() ? "" : `<p class="nota">Tu usuario es de solo lectura.</p>`}
     </div>
 
@@ -688,7 +844,7 @@ function pintarFicha(tipo, o, hitos, notas) {
         <textarea name="texto" required placeholder="Qué pasó, qué se resolvió o qué falta" aria-label="Texto de la entrada"></textarea>
         <button class="boton boton-primario" type="submit">Agregar al cuaderno</button>
       </form>` : ""}
-      ${notas.length ? notas.map((n) => `<div class="entrada"><div class="meta"><b>${fecha(n.fecha)}</b><span>${esc(n.tipo[0] + n.tipo.slice(1).toLowerCase())}</span><span>${esc(n.autor || "")}</span></div><p>${esc(n.texto)}</p></div>`).join("")
+      ${notas == null ? `<p class="nota">Sin conexión: el cuaderno se ve cuando vuelva la señal.</p>` : notas.length ? notas.map((n) => `<div class="entrada"><div class="meta"><b>${fecha(n.fecha)}</b><span>${esc(n.tipo[0] + n.tipo.slice(1).toLowerCase())}</span><span>${esc(n.autor || "")}</span></div><p>${esc(n.texto)}</p></div>`).join("")
         : `<p class="nota">Todavía no hay entradas. ${editor() ? "Escribí la primera arriba." : ""}</p>`}
     </div>
 
