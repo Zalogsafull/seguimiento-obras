@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-28";
+import { crearApi } from "./api.js?v=2026-11-20-29";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -108,9 +108,9 @@ function categoria(tipo, o) {
 // ------------------------------------------------------------ utilidades
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const hoy = () => new Date().toISOString().slice(0, 10);
-// fecha de hoy en la hora de Uruguay (para comparar con fechas sin hora)
-const hoyLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+// fecha de hoy en la hora del dispositivo (Uruguay); con toISOString después de las 21 h daba mañana
+const hoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const hoyLocal = hoy;
 // Fin previsto ya pasado y la obra sin terminar
 const atrasada = (o) => !!o.fin_previsto && o.estado !== "FIN" && String(o.fin_previsto).slice(0, 10) < hoyLocal();
 const diasAtraso = (o) => Math.round((new Date(hoyLocal()) - new Date(String(o.fin_previsto).slice(0, 10))) / 864e5);
@@ -446,19 +446,12 @@ function mostrarApp() {
   };
   $("#boton-usuarios").onclick = abrirAdmin;
   $("#salir").onclick = salirCuenta;
-  $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
   $("#estado-datos").onclick = () => { if (S.estadoRed === "sinred") actualizar(); };
   $("#actualizar-ahora").onclick = async () => { await actualizar(); pintarAjustes(); };
-  $("#inf-pdf").onclick = (ev) => hacerInforme(ev.currentTarget);
-  $("#inf-excel").onclick = (ev) => {
-    const id = $("#inf-capa").value;
-    exportarExcel(id, filasDeCapa(id, $("#inf-filtros").checked).sort(porCodigo), ev.currentTarget);
-  };
   $("#abrir-tabla").onclick = abrirTabla;
   prepararMapa();
   prepararPanel();
   const v = leerJSON(CLAVE_VISTA);
-  if (v?.tab && v.tab !== S.tab && document.querySelector(`[data-tab="${v.tab}"]`)) verTab(v.tab);
   pintar();
   // al volver la señal, o al volver a la app después de un rato, se actualiza sola
   addEventListener("online", () => actualizar());
@@ -555,13 +548,12 @@ async function cargar() {
   if (!$("#tabla").hidden && !document.querySelector("#tabla .editando")) pintarTabla();
 }
 
-// ------------------------------------------------------------ pestañas
+// ------------------------------------------------------------ paneles
+// Abre un panel (capas, filtros, lista…) aunque ya esté abierto otro
 function verTab(t) {
-  S.tab = t;
-  if (typeof UI !== "undefined" && UI.modo !== "capas") { UI.modo = "capas"; guardarUI(); aplicarUI(); }
-  escribirJSON(CLAVE_VISTA, { ...(leerJSON(CLAVE_VISTA) || {}), tab: t });
-  document.querySelectorAll("#pestanas [data-tab]").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === t));
-  document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = d.dataset.panel !== t));
+  UI.modo = t;
+  UI.plegado = false;
+  guardarUI(); aplicarUI();
   pintarPanel();
 }
 
@@ -850,12 +842,7 @@ async function cargarSolicitudes() {
   try { S.solicitudes = (await conTiempo(S.api.solicitudes(), 20000)) || []; }
   catch (e) { S.solicitudes = S.solicitudes || []; return; }
   const n = S.perfil?.admin ? S.solicitudes.length : 0;
-  const a = document.querySelector('.ctrl-paneles a[data-modo="ajustes"]');
-  if (a) {
-    let ins = a.querySelector(".insignia");
-    if (n && !ins) { ins = document.createElement("span"); ins.className = "insignia"; a.append(ins); }
-    if (ins) { ins.textContent = n; ins.hidden = !n; }
-  }
+  insignia("ajustes", n);
   if (n && !S.avisoSolicitudes) {
     S.avisoSolicitudes = true;
     aviso(`Tenés ${n} pedido${n > 1 ? "s" : ""} para borrar algo. Miralo${n > 1 ? "s" : ""} en Ajustes.`);
@@ -989,15 +976,15 @@ function armadoInforme(id) {
     anchos: { 9: { cellWidth: 62 } } };
 }
 
-async function hacerInforme(boton) {
+// PDF de una capa con las filas dadas (las de la Tabla: capa, filtros y búsqueda)
+async function hacerInforme(boton, id, filas, respetar) {
   const original = boton.textContent;
   boton.disabled = true; boton.textContent = "Armando el PDF…";
   try {
     const JsPDF = await prepararPDF();
-    const id = $("#inf-capa").value, capa = CAPAS_LISTA.find((c) => c.id === id);
-    const respetar = $("#inf-filtros").checked;
+    const capa = CAPAS_LISTA.find((c) => c.id === id);
     const a = armadoInforme(id);
-    const xs = filasDeCapa(id, respetar).sort(a.ordenar);
+    const xs = [...filas].sort(a.ordenar);
     const conSimbolo = a.simbolo !== false;
     const cols = conSimbolo ? ["", ...a.cols] : a.cols;
     const anchos = {};
@@ -1134,6 +1121,10 @@ function filasTabla() {
 function pintarTabla() {
   const caja = $("#tabla");
   if (caja.hidden) return;
+  // se conserva dónde estabas (antes, cada cambio volvía la tabla al principio)
+  const viejo = caja.querySelector(".tabla-scroll");
+  const pos = viejo && T.capaPintada === T.capa ? [viejo.scrollTop, viejo.scrollLeft] : [0, 0];
+  T.capaPintada = T.capa;
   const { xs, tipo, cols } = filasTabla();
   const ids = new Set(xs.map((x) => x.o.id));
   for (const id of [...T.sel]) if (!ids.has(id)) T.sel.delete(id);
@@ -1148,6 +1139,7 @@ function pintarTabla() {
       <input id="t-buscar" type="search" placeholder="Buscar en la tabla" value="${esc(T.texto)}" aria-label="Buscar">
       <label class="t-check"><input type="checkbox" id="t-respetar" ${T.respetar ? "checked" : ""}> Respetar filtros y categorías</label>
       <span class="t-cuenta">${xs.length} fila${xs.length === 1 ? "" : "s"}${T.sel.size ? ` · ${T.sel.size} elegida${T.sel.size === 1 ? "" : "s"}` : ""}</span>
+      <button class="boton boton-chico" type="button" id="t-pdf" title="PDF A4 de las filas de la tabla, listo para imprimir">Exportar PDF</button>
       <button class="boton boton-chico" type="button" id="t-excel">Exportar Excel</button>
       ${puede ? `<button class="boton boton-chico" type="button" id="t-importar" title="Subir un Excel exportado desde acá, con datos cambiados">Importar Excel</button>
         <input type="file" id="t-archivo" accept=".xlsx,.xls" hidden>` : ""}
@@ -1180,12 +1172,15 @@ function pintarTabla() {
     </div>
     <p class="tabla-ayuda nota">${puede ? "Doble clic en una celda con fondo claro para editarla. Doble clic en el código abre la ficha. Elegí filas para cambiar un campo en todas juntas." : "Doble clic en una fila abre la ficha."}</p>`;
 
+  const sc = caja.querySelector(".tabla-scroll");
+  sc.scrollTop = pos[0]; sc.scrollLeft = pos[1];
   $("#t-cerrar").onclick = cerrarTabla;
   $("#t-capa").onchange = (ev) => { T.capa = ev.target.value; T.sel.clear(); T.orden = "codigo"; T.desc = false; pintarTabla(); };
   const b = $("#t-buscar");
   b.oninput = () => { T.texto = b.value; clearTimeout(T.timer); T.timer = setTimeout(() => { pintarTabla(); const nb = $("#t-buscar"); nb.focus(); nb.setSelectionRange(nb.value.length, nb.value.length); }, 250); };
   $("#t-respetar").onchange = (ev) => { T.respetar = ev.target.checked; pintarTabla(); };
   $("#t-excel").onclick = (ev) => exportarExcel(T.capa, xs, ev.currentTarget);
+  $("#t-pdf").onclick = (ev) => hacerInforme(ev.currentTarget, T.capa, xs, T.respetar || !!T.texto);
   const imp = $("#t-importar");
   if (imp) {
     imp.onclick = () => $("#t-archivo").click();
@@ -1468,10 +1463,6 @@ function mostrarImportacion(tipo, nombre, cambios, problemas, sinId) {
 // ------------------------------------------------------------ ajustes (cuenta, mapa y datos guardados)
 function pintarAjustes() {
   pintarSolicitudes();
-  const sc = $("#inf-capa");
-  if (!sc.options.length) sc.innerHTML = opcionesCapas("obra_e");
-  const nf = filtrosActivos();
-  $("#inf-filtros-texto").textContent = `Respetar los filtros${nf ? ` (${nf} activo${nf > 1 ? "s" : ""})` : ""} y las categorías tildadas en Capas`;
   const rol = editor() ? "Editor" : "Solo lectura";
   $("#cuenta-detalle").textContent = [S.usuario?.email, rol, S.perfil?.iniciales_do ? "D.O. " + S.perfil.iniciales_do : ""].filter(Boolean).join(" · ");
   const m = $("#ajustes-mapa");
@@ -1587,12 +1578,10 @@ function pintarLista(v) {
 
 function pintarPanel(rehacerFiltros = true) {
   const v = visibles();
-  $("#cuenta-lista").textContent = v.length;
-  $("#cuenta-filtros").textContent = filtrosActivos() || "";
-  if (S.tab === "capas") pintarCapas();
-  if (S.tab === "filtros" && rehacerFiltros) pintarFiltros();
-  if (S.tab === "lista") pintarLista(v);
-  if (S.tab === "venc") pintarVencimientos();
+  insignia("filtros", filtrosActivos(), "suave");
+  if (UI.modo === "capas") pintarCapas();
+  if (UI.modo === "filtros" && rehacerFiltros) pintarFiltros();
+  if (UI.modo === "lista") pintarLista(v);
   if (UI.modo === "ajustes") pintarAjustes();
   if (UI.modo === "utilidad") pintarUtilidad();
   if (UI.modo === "referencias") pintarReferencias();
@@ -1625,28 +1614,6 @@ function enlazarFilas(cont) {
   });
 }
 
-function pintarVencimientos() {
-  const base = [];
-  for (const x of unicos(todas())) if (pasaFiltros(x.tipo, x.o)) base.push(x);
-  const rec = base.filter((x) => x.tipo === "estructura" && CAT[x.cat].recepcion && x.o.dias_para_recepcion != null && x.o.dias_para_recepcion < 180)
-    .sort((a, b) => a.o.dias_para_recepcion - b.o.dias_para_recepcion);
-  const hit = base.filter((x) => x.o.proximo_vencimiento).sort((a, b) => a.o.proximo_vencimiento.localeCompare(b.o.proximo_vencimiento));
-  const dias = (d) => (d < 0 ? `vencida hace ${-d} d` : d === 0 ? "vence hoy" : `faltan ${d} d`);
-  const cont = $("#vencimientos");
-  cont.className = "venc";
-  const aviso = filtrosActivos() ? `<p class="resumen">Con ${filtrosActivos()} filtro${filtrosActivos() > 1 ? "s" : ""} activo${filtrosActivos() > 1 ? "s" : ""}.</p>` : "";
-  cont.innerHTML = `${aviso}
-    <h3>Recepciones vencidas y de los próximos 6 meses</h3>
-    <ol class="lista">${rec.length ? rec.map((x) => filaHtml(x, `<span class="${x.o.dias_para_recepcion < 0 ? "mal" : ""}">${dias(x.o.dias_para_recepcion)}</span>`)).join("")
-      : `<li class="vacio">No hay recepciones vencidas ni que venzan en los próximos 6 meses.</li>`}</ol>
-    <h3>Hitos con fecha o recordatorio</h3>
-    <ol class="lista">${hit.length ? hit.map((x) => {
-      const d = Math.round((new Date(x.o.proximo_vencimiento + "T12:00:00") - new Date(hoy() + "T12:00:00")) / 864e5);
-      return filaHtml(x, `<span class="${d < 0 ? "mal" : ""}">${fecha(x.o.proximo_vencimiento)}</span>`);
-    }).join("") : `<li class="vacio">Ningún hito tiene fecha prevista ni recordatorio. Cargalos en la ficha de cada obra.</li>`}</ol>`;
-  cont.querySelectorAll(".eti span.mal").forEach((s) => s.parentElement.classList.add("mal"));
-  enlazarFilas(cont);
-}
 
 // ------------------------------------------------------------ mapa
 function prepararMapa() {
@@ -2070,12 +2037,9 @@ function aplicarUI() {
   raiz.setProperty("--panel-ancho", movil.matches ? "100%" : UI.ancho + "px");
   raiz.setProperty("--hoja", UI.alto + "px");
   app.classList.toggle("plegado", UI.plegado);
-  if (!["capas", "utilidad", "ajustes", "referencias"].includes(UI.modo)) UI.modo = "capas";
-  const otro = UI.modo !== "capas";
-  $("#pestanas").hidden = otro;
-  $("#titulo-panel").hidden = !otro;
-  $("#titulo-panel").textContent = { ajustes: "Ajustes", utilidad: "Capas de utilidad", referencias: "Referencias" }[UI.modo] || "";
-  document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = d.dataset.panel !== (otro ? UI.modo : S.tab)));
+  if (!TITULOS_PANEL[UI.modo]) UI.modo = "capas";
+  $("#titulo-panel").textContent = TITULOS_PANEL[UI.modo];
+  document.querySelectorAll("[data-panel]").forEach((d) => (d.hidden = d.dataset.panel !== UI.modo));
   document.querySelectorAll(".ctrl-paneles a").forEach((a) => {
     const on = !UI.plegado && a.dataset.modo === UI.modo;
     a.classList.toggle("activo", on);
@@ -2090,6 +2054,16 @@ function aplicarUI() {
 }
 
 function plegar(v) { UI.plegado = v; guardarUI(); aplicarUI(); }
+const TITULOS_PANEL = { capas: "Capas de obra", filtros: "Filtros", lista: "Lista de lo visible",
+  utilidad: "Capas de utilidad", referencias: "Referencias", ajustes: "Ajustes" };
+// Número chico sobre un botón de la izquierda (filtros activos, pedidos de borrado)
+function insignia(modo, n, clase = "") {
+  const a = document.querySelector(`.ctrl-paneles a[data-modo="${modo}"]`);
+  if (!a) return;
+  let ins = a.querySelector(".insignia");
+  if (n && !ins) { ins = document.createElement("span"); a.append(ins); }
+  if (ins) { ins.className = `insignia ${clase}`; ins.textContent = n || ""; ins.hidden = !n; }
+}
 
 // Botones a la izquierda del mapa: abren y cierran el panel de Capas o el de Ajustes.
 function abrirModo(modo) {
@@ -2097,13 +2071,14 @@ function abrirModo(modo) {
   UI.modo = modo;
   UI.plegado = false;
   guardarUI(); aplicarUI();
-  if (modo === "ajustes") pintarAjustes(); else if (modo === "utilidad") pintarUtilidad();
-  else if (modo === "referencias") pintarReferencias(); else pintarPanel();
+  pintarPanel();
 }
 function agregarBotonesPaneles() {
   const ICONOS = {
     utilidad: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 21s-6-5.6-6-10.4a6 6 0 0 1 12 0C18 15.4 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.2 10.6h5.6M12 7.8v5.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
     referencias: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M5 4.5 8 9.5H2zM20.5 6.8h-9.5M20.5 12.3h-9.5M20.5 17.8h-9.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="5" cy="12.3" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="3" y="15.8" width="4" height="4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+    filtros: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3.5 5h17l-6.6 7.8v5.6l-3.8 1.8v-7.4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    lista: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 6.5h11.5M9 12h11.5M9 17.5h11.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="4.8" cy="6.5" r="1.4" fill="currentColor"/><circle cx="4.8" cy="12" r="1.4" fill="currentColor"/><circle cx="4.8" cy="17.5" r="1.4" fill="currentColor"/></svg>',
     capas: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3.5 21 8l-9 4.5L3 8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m3 12 9 4.5 9-4.5M3 16l9 4.5 9-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
     ajustes: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M10.3 2.8h3.4l.5 2.6 1.6.9 2.5-.9 1.7 2.9-2 1.8v1.8l2 1.8-1.7 2.9-2.5-.9-1.6.9-.5 2.6h-3.4l-.5-2.6-1.6-.9-2.5.9-1.7-2.9 2-1.8v-1.8l-2-1.8 1.7-2.9 2.5.9 1.6-.9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
   };
@@ -2111,7 +2086,7 @@ function agregarBotonesPaneles() {
     options: { position: "topleft" },
     onAdd() {
       const div = L.DomUtil.create("div", "leaflet-bar ctrl-paneles");
-      for (const [modo, titulo] of [["capas", "Capas de obra: capas, filtros, lista y vencimientos"], ["utilidad", "Capas de utilidad: relevamiento y departamentos"], ["referencias", "Referencias: qué quiere decir cada símbolo"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"]]) {
+      for (const [modo, titulo] of [["capas", "Capas de obra"], ["filtros", "Filtros"], ["lista", "Lista de lo que se ve en el mapa"], ["utilidad", "Capas de utilidad: relevamiento y departamentos"], ["referencias", "Referencias: qué quiere decir cada símbolo"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"]]) {
         const a = L.DomUtil.create("a", "", div);
         a.href = "#"; a.role = "button"; a.dataset.modo = modo; a.title = titulo; a.setAttribute("aria-label", titulo);
         a.innerHTML = ICONOS[modo];

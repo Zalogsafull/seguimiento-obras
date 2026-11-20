@@ -433,3 +433,13 @@ body.con-tabla .mapa-zona { display: none; }
 .imp-mal { margin: 8px 0 0; color: #FF8A80; }
 .imp-lista { margin: 8px 0 0; padding-left: 18px; color: var(--tinta); }
 .imp-lista li { margin: 2px 0; }
+
+.insignia.suave { background: var(--acento-fuerte); }
+/* Tabla en el celular: ocupa toda la pantalla debajo de la barra */
+@media (max-width: 760px) {
+  .tabla-vista { position: fixed; top: var(--barra); left: 0; right: 0; bottom: 0; z-index: 1300; border-left: 0; }
+  .tabla-barra { gap: 8px; padding: 8px 10px; }
+  .tabla-barra h2 { width: 100%; }
+  .tabla-barra input[type=search] { width: 100%; }
+  .t-cuenta { margin-left: 0; }
+}
