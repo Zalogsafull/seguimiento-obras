@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-24";
+import { crearApi } from "./api.js?v=2026-11-20-25";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -28,7 +28,7 @@ const CAPAS = [
     cats: ["plazo", "r6", "r3", "vencida"], on: true },
   { id: "term_e", grupo: "ESTRUCTURAS", nombre: "Estructuras OICI (terminadas)", tipo: "estructura",
     cats: ["sinrecep", "provisoria", "recibida"], on: false },
-  { id: "obras", grupo: "ESTRUCTURAS", nombre: "Obras", tipo: "obra",
+  { id: "obras", grupo: "OBRAS", nombre: "Obras", tipo: "obra",
     cats: ["proyecto", "aprobado_o", "infra", "terminada"], on: true, apagadas: ["terminada"] },
 ];
 // Qué símbolo queda arriba cuando dos se tocan: primero lo que está en obra, después recepciones,
