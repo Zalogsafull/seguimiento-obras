@@ -85,6 +85,21 @@ async function crearNeon() {
       chequear(await neon.rpc("admin_habilitar", { p_user_id: user_id, p_nombre: nombre, p_rol: rol, p_iniciales: iniciales }), "Habilitar");
     },
     async adminQuitar(user_id) { chequear(await neon.rpc("admin_quitar", { p_user_id: user_id }), "Quitar acceso"); },
+    async pedirBorrado(tipo, id, motivo) {
+      const { data, error } = await neon.rpc("pedir_borrado", { p_tipo: tipo, p_id: id, p_motivo: motivo });
+      if (error) throw new Error(/pedir_borrado|schema cache/i.test(error.message)
+        ? "Falta preparar la base para borrar: corré sql/parte9_borrar.sql en Neon y tocá Refresh schema cache."
+        : "Borrar: " + error.message);
+      return data;
+    },
+    async solicitudes() {
+      const { data, error } = await neon.rpc("solicitudes_pendientes");
+      if (error) return []; // sin la parte 9 todavía no hay pedidos
+      return data || [];
+    },
+    async resolverBorrado(id, aprobar) {
+      chequear(await neon.rpc("resolver_borrado", { p_solicitud: id, p_aprobar: aprobar }), "Resolver pedido");
+    },
   };
 }
 
@@ -198,6 +213,17 @@ function crearDemo() {
     async adminHabilitar(id, nombre, rol, ini) {
       Object.assign(cuentas.find((c) => c.user_id === id), { nombre, rol, iniciales_do: ini, habilitado: true });
     },
+    async pedirBorrado(tipo, id, motivo) {
+      await espera();
+      const t = tipo === "relevamiento" ? relev : lista(tipo);
+      const o = t.find((x) => x.id === id);
+      if (!o) throw new Error("Borrar: ya no existe");
+      // en la demostración el usuario es administrador: borra directo
+      t.splice(t.indexOf(o), 1);
+      return "BORRADO";
+    },
+    async solicitudes() { await espera(); return []; },
+    async resolverBorrado() { await espera(); },
     async adminQuitar(id) {
       if (id === "demo") throw new Error("No podés quitarte el acceso a vos mismo");
       Object.assign(cuentas.find((c) => c.user_id === id), { nombre: null, rol: null, iniciales_do: null, habilitado: false });

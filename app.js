@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-14";
+import { crearApi } from "./api.js?v=2026-11-20-15";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -218,7 +218,13 @@ function estadoDatos(modo) {
   el.title = modo === "sinred" ? "Tocá para reintentar" : "";
 }
 async function salirCuenta() {
-  try { await S.api?.salir(); } catch (e) { /* sin conexión: igual se borra lo guardado */ }
+  try {
+    if (!S.api) S.api = await conTiempo(crearApi(), 20000);
+    await conTiempo(S.api.salir(), 15000);
+  } catch (e) {
+    aviso("No se pudo cerrar la sesión porque no hay conexión con Neon. Probá de nuevo en un rato.", true);
+    return;
+  }
   borrarGuardado();
   location.reload();
 }
@@ -392,7 +398,11 @@ function mostrarApp() {
   if (S.appLista) return;
   S.appLista = true;
   $("#boton-nuevo").onclick = abrirNuevo;
-  $("#recargar").onclick = () => { $("#recargar").classList.add("girando"); location.reload(); };
+  $("#recargar").onclick = () => {
+    $("#recargar").classList.add("girando");
+    if (navigator.onLine) { try { localStorage.removeItem(CLAVE_DATOS); } catch (e) { /* nada */ } }
+    location.reload();
+  };
   $("#boton-usuarios").onclick = abrirAdmin;
   $("#salir").onclick = salirCuenta;
   $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
@@ -410,6 +420,18 @@ function mostrarApp() {
   });
 }
 
+// Si no se pudo actualizar, se vuelve a intentar sola: a los 10 s, 30 s, 1 min y 2 min.
+function reintentarLuego() {
+  const esperas = [10, 30, 60, 120];
+  S.reintentos = (S.reintentos || 0);
+  if (S.reintentos >= esperas.length || S.timerReintento) return;
+  const s = esperas[S.reintentos++];
+  S.timerReintento = setTimeout(() => { S.timerReintento = null; actualizar(); }, s * 1000);
+}
+function anotarError(e) {
+  S.ultimoError = { texto: String(e?.message || e).slice(0, 200), hora: new Date().toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false }) };
+}
+
 // Revisa la sesión (si arrancó con lo guardado) y trae los datos nuevos.
 async function actualizar() {
   if (S.actualizando) return;
@@ -417,12 +439,12 @@ async function actualizar() {
   try {
     estadoDatos("actualizando");
     if (!S.api) {
-      try { S.api = await conTiempo(crearApi(), 20000); prepararIngreso(); }
-      catch (e) { S.api = null; return estadoDatos("sinred"); }
+      try { S.api = await conTiempo(crearApi(), 30000); prepararIngreso(); }
+      catch (e) { S.api = null; anotarError(e); reintentarLuego(); return estadoDatos("sinred"); }
     }
     if (!S.verificado) {
       let u;
-      try { u = await conTiempo(S.api.usuario(), 20000); } catch (e) { return estadoDatos("sinred"); }
+      try { u = await conTiempo(S.api.usuario(), 30000); } catch (e) { anotarError(e); reintentarLuego(); return estadoDatos("sinred"); }
       if (!u) {
         if (!navigator.onLine) return estadoDatos("sinred");
         estadoDatos(null);
@@ -431,7 +453,7 @@ async function actualizar() {
       if (u.email !== S.usuario.email) { borrarGuardado(); location.reload(); return; }
       S.usuario = u;
       let p;
-      try { p = await conTiempo(S.api.perfil(), 20000); } catch (e) { return estadoDatos("sinred"); }
+      try { p = await conTiempo(S.api.perfil(), 30000); } catch (e) { anotarError(e); reintentarLuego(); return estadoDatos("sinred"); }
       if (!p) { borrarGuardado(); location.reload(); return; } // le quitaron el acceso
       S.perfil = p;
       S.verificado = true;
@@ -451,8 +473,10 @@ async function cargar() {
     S.datos.estructura = e || [];
     S.datos.obra = o || [];
   } catch (e) {
+    anotarError(e);
     // sin señal: se siguen mostrando los datos guardados
     estadoDatos(sinRed(e) ? "sinred" : null);
+    reintentarLuego();
     if (!(habia && sinRed(e))) {
       const d = document.createElement("div");
       d.className = "aviso mal";
@@ -475,8 +499,10 @@ async function cargar() {
     }
   }
   S.datosDe = Date.now();
+  S.reintentos = 0;
   guardarDatos();
   estadoDatos(null);
+  cargarSolicitudes();
   pintar();
   if (UI.modo === "ajustes" && !UI.plegado) pintarAjustes();
 }
@@ -694,8 +720,130 @@ function agregarBotonBase() {
   new Ctrl().addTo(S.mapa);
 }
 
+// ------------------------------------------------------------ borrar (el administrador borra; un editor lo pide)
+const NOMBRE_TIPO = { estructura: "estructura", obra: "obra", relevamiento: "punto de relevamiento" };
+const pedidoDe = (tipo, id) => (S.solicitudes || []).find((x) => x.tipo === tipo && x.objeto_id === id);
+function bloqueBorrar(tipo, o) {
+  if (!editor()) return "";
+  const p = pedidoDe(tipo, o.id);
+  const nombre = NOMBRE_TIPO[tipo];
+  let cuerpo;
+  if (p && S.perfil?.admin) {
+    cuerpo = `<p class="nota" style="margin:0 0 10px">${esc(p.pedido_nombre || "Alguien")} pidió que se borre${p.motivo ? `: "${esc(p.motivo)}"` : "."}</p>
+      <div class="acciones"><button class="boton boton-peligro" type="button" data-resolver="${p.id}" data-aprobar="1">Aprobar y borrar</button>
+      <button class="boton" type="button" data-resolver="${p.id}" data-aprobar="0">Rechazar</button></div>`;
+  } else if (p) {
+    cuerpo = `<p class="nota" style="margin:0">Pediste que se borre. Queda así hasta que un administrador lo apruebe o lo rechace.</p>`;
+  } else if (S.perfil?.admin) {
+    cuerpo = `<button class="boton boton-peligro" type="button" id="borrar-elemento">Borrar ${nombre}</button>
+      <p class="nota" style="margin:8px 0 0">Se borra también su historial de hitos y cuaderno. Queda una copia de respaldo en la base.</p>`;
+  } else {
+    cuerpo = `<button class="boton boton-peligro" type="button" id="pedir-borrado">Pedir que se borre</button>
+      <form class="form" id="form-borrado" hidden style="margin-top:10px">
+        <label>¿Por qué hay que borrarla?<textarea name="motivo" rows="2" placeholder="Ej. está duplicada con CPD-12"></textarea></label>
+        <div class="acciones"><button class="boton boton-peligro" type="submit">Enviar pedido</button>
+        <button class="boton" type="button" id="cancelar-borrado">Cancelar</button></div>
+      </form>
+      <p class="nota" style="margin:8px 0 0">Un administrador recibe el pedido y lo aprueba o lo rechaza.</p>`;
+  }
+  return `<div class="ficha-bloque zona-borrar"><h2>Borrar</h2>${cuerpo}</div>`;
+}
+function enlazarBorrar(ficha, tipo, o) {
+  const nombre = NOMBRE_TIPO[tipo], cod = o.codigo || nombre;
+  const despues = async (texto) => {
+    aviso(texto);
+    cerrarFicha();
+    await cargar();
+  };
+  const b = $("#borrar-elemento", ficha);
+  if (b) b.onclick = async () => {
+    if (!confirm(`¿Borrar ${cod}? Se borra para todos (web, QGIS y QField), con sus hitos y su cuaderno. Queda una copia de respaldo en la base.`)) return;
+    b.disabled = true;
+    try { await S.api.pedirBorrado(tipo, o.id, null); await despues(`${cod} borrado`); }
+    catch (e) { aviso(e.message, true); b.disabled = false; }
+  };
+  const pb = $("#pedir-borrado", ficha), fb = $("#form-borrado", ficha);
+  if (pb) {
+    pb.onclick = () => { pb.hidden = true; fb.hidden = false; fb.motivo.focus(); };
+    $("#cancelar-borrado", ficha).onclick = () => { pb.hidden = false; fb.hidden = true; };
+    fb.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const enviar = fb.querySelector("button[type=submit]");
+      enviar.disabled = true;
+      try {
+        const r = await S.api.pedirBorrado(tipo, o.id, fb.motivo.value.trim());
+        aviso(r === "YA_PEDIDO" ? "Ya había un pedido para borrarla." : "Pedido enviado al administrador");
+        await cargarSolicitudes();
+        if (tipo === "relevamiento") abrirRelev(o.id); else pintarFicha(tipo, o, ...ultimaFicha(tipo, o.id));
+      } catch (e) { aviso(e.message, true); enviar.disabled = false; }
+    };
+  }
+  ficha.querySelectorAll("[data-resolver]").forEach((x) => {
+    x.onclick = () => resolverPedido(Number(x.dataset.resolver), x.dataset.aprobar === "1", cod, true);
+  });
+}
+async function resolverPedido(id, aprobar, cod, desdeFicha) {
+  if (aprobar && !confirm(`¿Aprobar y borrar ${cod}? Se borra para todos, con sus hitos y su cuaderno.`)) return;
+  try {
+    await S.api.resolverBorrado(id, aprobar);
+    aviso(aprobar ? `${cod} borrado` : "Pedido rechazado");
+    if (desdeFicha && aprobar) cerrarFicha();
+    await cargar();
+    if (desdeFicha && !aprobar && S.abierta) {
+      const { tipo, id: oid } = S.abierta;
+      if (tipo === "relev") abrirRelev(oid); else abrirFicha(tipo, oid);
+    }
+  } catch (e) { aviso(e.message, true); }
+}
+// Pedidos pendientes: el administrador los ve en Ajustes y con un número en el botón
+async function cargarSolicitudes() {
+  try { S.solicitudes = (await conTiempo(S.api.solicitudes(), 20000)) || []; }
+  catch (e) { S.solicitudes = S.solicitudes || []; return; }
+  const n = S.perfil?.admin ? S.solicitudes.length : 0;
+  const a = document.querySelector('.ctrl-paneles a[data-modo="ajustes"]');
+  if (a) {
+    let ins = a.querySelector(".insignia");
+    if (n && !ins) { ins = document.createElement("span"); ins.className = "insignia"; a.append(ins); }
+    if (ins) { ins.textContent = n; ins.hidden = !n; }
+  }
+  if (n && !S.avisoSolicitudes) {
+    S.avisoSolicitudes = true;
+    aviso(`Tenés ${n} pedido${n > 1 ? "s" : ""} para borrar algo. Miralo${n > 1 ? "s" : ""} en Ajustes.`);
+  }
+  if (UI.modo === "ajustes" && !UI.plegado) pintarAjustes();
+}
+function pintarSolicitudes() {
+  const cont = $("#ajustes-solicitudes");
+  if (!cont) return;
+  const lista = S.perfil?.admin ? (S.solicitudes || []) : [];
+  cont.hidden = !lista.length;
+  if (!lista.length) return;
+  const nombreDe = (x) => {
+    const t = x.tipo === "relevamiento" ? "relev" : x.tipo;
+    const o = S.datos[t]?.find((y) => y.id === x.objeto_id);
+    return (o?.codigo || x.codigo || "Sin código") + " · " + NOMBRE_TIPO[x.tipo];
+  };
+  cont.innerHTML = `<h3>Pedidos para borrar <span class="cuenta">${lista.length}</span></h3>
+    ${lista.map((x) => `<div class="pedido">
+      <p><b>${esc(nombreDe(x))}</b><br><small>${esc(x.pedido_nombre || "")} · ${fecha(String(x.creado).slice(0, 10))}</small>
+      ${x.motivo ? `<br><span>"${esc(x.motivo)}"</span>` : ""}</p>
+      <div class="acciones">
+        <button class="boton boton-chico" type="button" data-ver="${x.id}">Ver</button>
+        <button class="boton boton-chico boton-peligro" type="button" data-ok="${x.id}">Aprobar y borrar</button>
+        <button class="boton boton-chico" type="button" data-no="${x.id}">Rechazar</button>
+      </div></div>`).join("")}`;
+  const por = (id) => lista.find((x) => x.id === Number(id));
+  cont.querySelectorAll("[data-ver]").forEach((b) => (b.onclick = () => {
+    const x = por(b.dataset.ver);
+    if (x.tipo === "relevamiento") abrirRelev(x.objeto_id); else abrirFicha(x.tipo, x.objeto_id);
+  }));
+  cont.querySelectorAll("[data-ok]").forEach((b) => (b.onclick = () => resolverPedido(Number(b.dataset.ok), true, nombreDe(por(b.dataset.ok)), false)));
+  cont.querySelectorAll("[data-no]").forEach((b) => (b.onclick = () => resolverPedido(Number(b.dataset.no), false, nombreDe(por(b.dataset.no)), false)));
+}
+
 // ------------------------------------------------------------ ajustes (cuenta, mapa y datos guardados)
 function pintarAjustes() {
+  pintarSolicitudes();
   const rol = editor() ? "Editor" : "Solo lectura";
   $("#cuenta-detalle").textContent = [S.usuario?.email, rol, S.perfil?.iniciales_do ? "D.O. " + S.perfil.iniciales_do : ""].filter(Boolean).join(" · ");
   const m = $("#ajustes-mapa");
@@ -709,6 +857,8 @@ function pintarAjustes() {
   $("#ajustes-datos").textContent = S.datosDe
     ? `Datos ${cuandoTexto(S.datosDe)}, con ${fichas} ficha${fichas === 1 ? "" : "s"} guardada${fichas === 1 ? "" : "s"} para ver sin señal.`
     : "Todavía no hay datos guardados.";
+  $("#ajustes-error").hidden = !S.ultimoError;
+  if (S.ultimoError) $("#ajustes-error").textContent = `Último problema de conexión (${S.ultimoError.hora}): ${S.ultimoError.texto}`;
 }
 
 // ------------------------------------------------------------ referencias (la leyenda, como en QGIS)
@@ -1089,9 +1239,11 @@ function pintarFicha(tipo, o, hitos, notas) {
       ${editor() ? `<label class="form" style="margin-top:10px">Situación
         <select id="cambiar-estado">${opciones}</select></label>
         <p class="nota" style="margin-top:6px">${tipo === "estructura" ? 'Pasa sola a "En obra" al marcar el hito Implantación, y a "Terminada" con infraestructura, hormigonado y montaje hechos.' : 'Pasá a "En obra" cuando arranca. El fin se marca con su hito.'}</p>` : ""}
-    </div>`;
+    </div>
+    ${bloqueBorrar(tipo, o)}`;
 
   enlazarCerrar(ficha, cerrarFicha);
+  enlazarBorrar(ficha, tipo, o);
   ficha.querySelectorAll(".hito").forEach((row) => enlazarHito(row, tipo, o.id));
   const fn = $("#form-nota", ficha);
   if (fn) fn.onsubmit = async (ev) => {
@@ -1740,8 +1892,10 @@ function abrirRelev(id) {
         <dt>Longitud</dt><dd>${Number(r.lon).toFixed(6)}</dd>
         <dt>Z</dt><dd>${r.z == null || r.z === "" ? "—" : numero(r.z, 2) + " m"}</dd>
       </dl>
-    </div>`;
+    </div>
+    ${bloqueBorrar("relevamiento", r)}`;
   enlazarCerrar(ficha, cerrarFicha);
+  enlazarBorrar(ficha, "relevamiento", r);
   $("#copiar-coord", ficha).onclick = async () => {
     try { await navigator.clipboard.writeText(coord); aviso("Coordenadas copiadas: " + coord); }
     catch (e) { aviso("No se pudo copiar. Coordenadas: " + coord, true); }
