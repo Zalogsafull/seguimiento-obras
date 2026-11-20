@@ -28,18 +28,38 @@ BEGIN
   END IF;
 END $$;
 
--- 2. Vista para la web, con latitud y longitud en WGS 84
-CREATE OR REPLACE VIEW public.v_relevamiento WITH (security_invoker = true) AS
-SELECT
-  r.fid AS id,
-  r."CÓDIGO"::text      AS codigo,
-  r."DESCRIPCIÓN"::text AS descripcion,
-  r."Z"::text           AS z,
-  ST_Y(ST_Transform(ST_Centroid(ST_Force2D(r.geom)), 4326)) AS lat,
-  ST_X(ST_Transform(ST_Centroid(ST_Force2D(r.geom)), 4326)) AS lon,
-  r."MAPS"::text        AS maps
-FROM public."Relevamiento" r
-WHERE r.geom IS NOT NULL;
+-- 2. Vista para la web, con latitud y longitud en WGS 84.
+--    Se arma con las columnas que existan de verdad en la capa (si falta alguna, queda vacía).
+DO $$
+DECLARE
+  v_geom text;
+  col    text;
+  v_sel  text := '';
+  par    record;
+BEGIN
+  SELECT f_geometry_column INTO v_geom FROM geometry_columns
+  WHERE f_table_schema = 'public' AND f_table_name = 'Relevamiento' LIMIT 1;
+  IF v_geom IS NULL THEN RAISE EXCEPTION 'La tabla "Relevamiento" no tiene columna de geometría registrada'; END IF;
+
+  FOR par IN SELECT * FROM (VALUES ('CÓDIGO', 'codigo'), ('DESCRIPCIÓN', 'descripcion'), ('Z', 'z'), ('MAPS', 'maps')) AS t(columna, alias) LOOP
+    -- busca la columna sin importar mayúsculas ni tildes
+    SELECT c.column_name INTO col FROM information_schema.columns c
+    WHERE c.table_schema = 'public' AND c.table_name = 'Relevamiento'
+      AND translate(upper(c.column_name), 'ÁÉÍÓÚ', 'AEIOU') = translate(upper(par.columna), 'ÁÉÍÓÚ', 'AEIOU')
+    LIMIT 1;
+    v_sel := v_sel || CASE WHEN col IS NULL THEN format('NULL::text AS %I, ', par.alias)
+                           ELSE format('r.%I::text AS %I, ', col, par.alias) END;
+  END LOOP;
+
+  EXECUTE 'DROP VIEW IF EXISTS public.v_relevamiento';
+  EXECUTE format($v$
+    CREATE VIEW public.v_relevamiento WITH (security_invoker = true) AS
+    SELECT r.fid AS id, %s
+      ST_Y(ST_Transform(ST_Centroid(ST_Force2D(r.%I)), 4326)) AS lat,
+      ST_X(ST_Transform(ST_Centroid(ST_Force2D(r.%I)), 4326)) AS lon
+    FROM public."Relevamiento" r
+    WHERE r.%I IS NOT NULL$v$, v_sel, v_geom, v_geom, v_geom);
+END $$;
 GRANT SELECT ON public.v_relevamiento TO authenticated;
 
 -- 3. Agregar puntos: misma función de la parte 4, ahora también para Relevamiento.
