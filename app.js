@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-9";
+import { crearApi } from "./api.js?v=2026-11-20-10";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -385,6 +385,7 @@ function mostrarApp() {
   if (S.appLista) return;
   S.appLista = true;
   $("#boton-nuevo").onclick = abrirNuevo;
+  $("#recargar").onclick = () => { $("#recargar").classList.add("girando"); location.reload(); };
   $("#boton-usuarios").onclick = abrirAdmin;
   $("#salir").onclick = salirCuenta;
   $("#pestanas").onclick = (ev) => { const b = ev.target.closest("[data-tab]"); if (b) verTab(b.dataset.tab); };
@@ -1258,7 +1259,7 @@ function agregarBotonesPaneles() {
     options: { position: "topleft" },
     onAdd() {
       const div = L.DomUtil.create("div", "leaflet-bar ctrl-paneles");
-      for (const [modo, titulo] of [["capas", "Capas de obra: capas, filtros, lista y vencimientos"], ["utilidad", "Capas de utilidad: relevamiento y departamentos"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"], ["referencias", "Referencias: qué quiere decir cada símbolo"]]) {
+      for (const [modo, titulo] of [["capas", "Capas de obra: capas, filtros, lista y vencimientos"], ["utilidad", "Capas de utilidad: relevamiento y departamentos"], ["referencias", "Referencias: qué quiere decir cada símbolo"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"]]) {
         const a = L.DomUtil.create("a", "", div);
         a.href = "#"; a.role = "button"; a.dataset.modo = modo; a.title = titulo; a.setAttribute("aria-label", titulo);
         a.innerHTML = ICONOS[modo];

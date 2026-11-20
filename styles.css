@@ -361,3 +361,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .leyenda { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 14px; }
 .leyenda li { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--tinta); }
 .leyenda svg { flex: none; }
+
+.boton-icono { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 32px; padding: 0; color: var(--tinta); }
+.boton-icono.girando svg { animation: girar .8s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .boton-icono.girando svg { animation: none; } }
