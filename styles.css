@@ -443,3 +443,5 @@ body.con-tabla .mapa-zona { display: none; }
   .tabla-barra input[type=search] { width: 100%; }
   .t-cuenta { margin-left: 0; }
 }
+
+@media (max-width: 760px) { body.con-tabla .panel { z-index: 1350; } }

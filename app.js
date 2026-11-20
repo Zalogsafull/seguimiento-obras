@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-29";
+import { crearApi } from "./api.js?v=2026-11-20-30";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1178,7 +1178,11 @@ function pintarTabla() {
   $("#t-capa").onchange = (ev) => { T.capa = ev.target.value; T.sel.clear(); T.orden = "codigo"; T.desc = false; pintarTabla(); };
   const b = $("#t-buscar");
   b.oninput = () => { T.texto = b.value; clearTimeout(T.timer); T.timer = setTimeout(() => { pintarTabla(); const nb = $("#t-buscar"); nb.focus(); nb.setSelectionRange(nb.value.length, nb.value.length); }, 250); };
-  $("#t-respetar").onchange = (ev) => { T.respetar = ev.target.checked; pintarTabla(); };
+  $("#t-respetar").onchange = (ev) => {
+    T.respetar = ev.target.checked;
+    if (T.respetar) verTab("filtros"); // abre los filtros al costado para ajustarlos
+    pintarTabla();
+  };
   $("#t-excel").onclick = (ev) => exportarExcel(T.capa, xs, ev.currentTarget);
   $("#t-pdf").onclick = (ev) => hacerInforme(ev.currentTarget, T.capa, xs, T.respetar || !!T.texto);
   const imp = $("#t-importar");
@@ -1591,6 +1595,8 @@ function pintarPanel(rehacerFiltros = true) {
 function pintar(rehacerFiltros = true) {
   guardarEstado();
   pintarMapa(pintarPanel(rehacerFiltros));
+  // la Tabla que respeta filtros se actualiza sola al cambiar filtros o categorías
+  if (T.respetar && !$("#tabla").hidden && !document.querySelector("#tabla .editando")) pintarTabla();
 }
 
 function filaHtml({ tipo, o, cat }, eti = "") {
