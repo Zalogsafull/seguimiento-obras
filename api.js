@@ -142,7 +142,13 @@ async function crearNeon() {
     },
     async carpetaAPapelera(url) {
       const token = (await neon.auth.getSession())?.data?.session?.token;
-      return llamarScript({ accion: "papelera", url, token });
+      try { return await llamarScript({ accion: "papelera", url, token }); }
+      catch (e) {
+        // el script viejo no conoce «papelera» y responde como si le pidieran crear una carpeta sin código
+        if (/código no válido/i.test(e.message))
+          throw new Error("el script de Google publicado es la versión vieja (no sabe mandar a la papelera). Guardalo y publicá una versión nueva.");
+        throw e;
+      }
     },
     async crearPunto(capa, lat, lon, datos) {
       return chequear(await neon.rpc("crear_punto", { p_capa: capa, p_lat: lat, p_lon: lon, p_datos: datos }), "Agregar punto");

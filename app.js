@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-23";
+import { crearApi } from "./api.js?v=2026-11-23-24";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -3159,7 +3159,7 @@ async function limpiarCarpetasViejas() {
         const r = await S.api.carpetaAPapelera(o.planos);
         if (r.ok || r.noEsta) { await S.api.guardarDatos(tipo, o.id, { [COLUMNA_PLANOS[tipo]]: null }); hechas.push(o.codigo); }
         else { omitidas.add(o.planos); problemas.push(`${o.codigo}: ${r.omitida}`); }
-      } catch (e) { problemas.push(`${o.codigo}: ${e.message}`); if (/conectar|sesión|editores|script/i.test(e.message)) break; }
+      } catch (e) { problemas.push(`${o.codigo}: ${e.message}`); if (/conectar|sesión|editores|script|versión vieja/i.test(e.message)) break; }
     }
   } finally {
     S.limpiandoCarpetas = false;
