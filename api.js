@@ -117,6 +117,8 @@ async function crearNeon() {
       const { data, error } = await neon.rpc("pedir_borrado", { p_tipo: tipo, p_id: id, p_motivo: motivo });
       if (error) throw new Error(/pedir_borrado|schema cache/i.test(error.message)
         ? "Falta preparar la base para borrar: corré sql/parte9_borrar.sql en Neon y tocá Refresh schema cache."
+        : /desconocida/i.test(error.message)
+        ? "Falta preparar la base para borrar en esta capa: corré sql/parte16_borrar_agrimensura.sql en Neon."
         : "Borrar: " + error.message);
       return data;
     },
@@ -280,7 +282,8 @@ function crearDemo() {
     },
     async pedirBorrado(tipo, id, motivo) {
       await espera();
-      const t = tipo === "relevamiento" ? relev : lista(tipo);
+      const t = tipo === "relevamiento" ? relev : tipo === "amojonamiento" ? agri.amoj : tipo === "triangulo" ? agri.tri
+        : tipo === "padron" ? agri.padr : lista(tipo);
       const o = t.find((x) => x.id === id);
       if (!o) throw new Error("Borrar: ya no existe");
       // en la demostración el usuario es administrador: borra directo

@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-6";
+import { crearApi } from "./api.js?v=2026-11-23-7";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -781,7 +781,20 @@ function agregarBotonBase() {
 }
 
 // ------------------------------------------------------------ borrar (el administrador borra; un editor lo pide)
-const NOMBRE_TIPO = { estructura: "estructura", obra: "obra", relevamiento: "punto de relevamiento" };
+const NOMBRE_TIPO = { estructura: "estructura", obra: "obra", relevamiento: "punto de relevamiento",
+  amojonamiento: "mojón", triangulo: "triángulo", padron: "padrón" };
+// tipo de borrado <-> clave de los datos y de la ficha abierta
+const DATOS_DE_TIPO = { relevamiento: "relev", amojonamiento: "amoj", triangulo: "tri", padron: "padr" };
+const TIPO_DE_FICHA = { relev: "relevamiento", amoj: "amojonamiento", tri: "triangulo", padr: "padron" };
+const conHitos = (tipo) => tipo === "estructura" || tipo === "obra";
+const nombreBorrar = (tipo, o) => (tipo === "padron" ? (o.padron ? "Padrón " + o.padron : "padrón sin número") : o.codigo || NOMBRE_TIPO[tipo]);
+// abre la ficha del elemento, sea de la capa que sea
+function abrirElemento(tipo, id) {
+  if (tipo === "relevamiento" || tipo === "relev") return abrirRelev(id);
+  const k = DATOS_DE_TIPO[tipo] || tipo;
+  if (k === "amoj" || k === "tri" || k === "padr") return abrirAgri(k, id);
+  return abrirFicha(tipo, id);
+}
 const pedidoDe = (tipo, id) => (S.solicitudes || []).find((x) => x.tipo === tipo && x.objeto_id === id);
 function bloqueBorrar(tipo, o) {
   if (!editor()) return "";
@@ -796,11 +809,11 @@ function bloqueBorrar(tipo, o) {
     cuerpo = `<p class="nota" style="margin:0">Pediste que se borre. Queda así hasta que un administrador lo apruebe o lo rechace.</p>`;
   } else if (S.perfil?.admin) {
     cuerpo = `<button class="boton boton-peligro" type="button" id="borrar-elemento">Borrar ${nombre}</button>
-      <p class="nota" style="margin:8px 0 0">Se borra también su historial de hitos y cuaderno. Queda una copia de respaldo en la base.</p>`;
+      <p class="nota" style="margin:8px 0 0">${conHitos(tipo) ? "Se borra también su historial de hitos y cuaderno. " : ""}Queda una copia de respaldo en la base.</p>`;
   } else {
     cuerpo = `<button class="boton boton-peligro" type="button" id="pedir-borrado">Pedir que se borre</button>
       <form class="form" id="form-borrado" hidden style="margin-top:10px">
-        <label>¿Por qué hay que borrarla?<textarea name="motivo" rows="2" placeholder="Ej. está duplicada con CPD-12"></textarea></label>
+        <label>¿Por qué hay que borrarlo?<textarea name="motivo" rows="2" placeholder="Ej. está duplicado, o quedó mal ubicado"></textarea></label>
         <div class="acciones"><button class="boton boton-peligro" type="submit">Enviar pedido</button>
         <button class="boton" type="button" id="cancelar-borrado">Cancelar</button></div>
       </form>
@@ -809,7 +822,7 @@ function bloqueBorrar(tipo, o) {
   return `<div class="ficha-bloque zona-borrar"><h2>Borrar</h2>${cuerpo}</div>`;
 }
 function enlazarBorrar(ficha, tipo, o) {
-  const nombre = NOMBRE_TIPO[tipo], cod = o.codigo || nombre;
+  const cod = nombreBorrar(tipo, o);
   const despues = async (texto) => {
     aviso(texto);
     cerrarFicha();
@@ -817,7 +830,7 @@ function enlazarBorrar(ficha, tipo, o) {
   };
   const b = $("#borrar-elemento", ficha);
   if (b) b.onclick = async () => {
-    if (!confirm(`¿Borrar ${cod}? Se borra para todos (web, QGIS y QField), con sus hitos y su cuaderno. Queda una copia de respaldo en la base.`)) return;
+    if (!confirm(`¿Borrar ${cod}? Se borra para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base.`)) return;
     b.disabled = true;
     try { await S.api.pedirBorrado(tipo, o.id, null); await despues(`${cod} borrado`); }
     catch (e) { aviso(e.message, true); b.disabled = false; }
@@ -832,9 +845,9 @@ function enlazarBorrar(ficha, tipo, o) {
       enviar.disabled = true;
       try {
         const r = await S.api.pedirBorrado(tipo, o.id, fb.motivo.value.trim());
-        aviso(r === "YA_PEDIDO" ? "Ya había un pedido para borrarla." : "Pedido enviado al administrador");
+        aviso(r === "YA_PEDIDO" ? "Ya había un pedido para borrarlo." : "Pedido enviado al administrador");
         await cargarSolicitudes();
-        if (tipo === "relevamiento") abrirRelev(o.id); else pintarFicha(tipo, o, ...ultimaFicha(tipo, o.id));
+        if (conHitos(tipo)) pintarFicha(tipo, o, ...ultimaFicha(tipo, o.id)); else abrirElemento(tipo, o.id);
       } catch (e) { aviso(e.message, true); enviar.disabled = false; }
     };
   }
@@ -843,7 +856,7 @@ function enlazarBorrar(ficha, tipo, o) {
   });
 }
 async function resolverPedido(id, aprobar, cod, desdeFicha) {
-  if (aprobar && !confirm(`¿Aprobar y borrar ${cod}? Se borra para todos, con sus hitos y su cuaderno.`)) return;
+  if (aprobar && !confirm(`¿Aprobar y borrar ${cod}? Se borra para todos (web, QGIS y QField). Queda una copia de respaldo en la base.`)) return;
   try {
     await S.api.resolverBorrado(id, aprobar);
     aviso(aprobar ? `${cod} borrado` : "Pedido rechazado");
@@ -851,7 +864,7 @@ async function resolverPedido(id, aprobar, cod, desdeFicha) {
     await cargar();
     if (desdeFicha && !aprobar && S.abierta) {
       const { tipo, id: oid } = S.abierta;
-      if (tipo === "relev") abrirRelev(oid); else abrirFicha(tipo, oid);
+      abrirElemento(tipo, oid);
     }
   } catch (e) { aviso(e.message, true); }
 }
@@ -874,9 +887,8 @@ function pintarSolicitudes() {
   cont.hidden = !lista.length;
   if (!lista.length) return;
   const nombreDe = (x) => {
-    const t = x.tipo === "relevamiento" ? "relev" : x.tipo;
-    const o = S.datos[t]?.find((y) => y.id === x.objeto_id);
-    return (o?.codigo || x.codigo || "Sin código") + " · " + NOMBRE_TIPO[x.tipo];
+    const o = S.datos[DATOS_DE_TIPO[x.tipo] || x.tipo]?.find((y) => y.id === x.objeto_id);
+    return (o ? nombreBorrar(x.tipo, o) : x.codigo || "Sin código") + " · " + NOMBRE_TIPO[x.tipo];
   };
   cont.innerHTML = `<h3>Pedidos para borrar <span class="cuenta">${lista.length}</span></h3>
     ${lista.map((x) => `<div class="pedido">
@@ -890,7 +902,7 @@ function pintarSolicitudes() {
   const por = (id) => lista.find((x) => x.id === Number(id));
   cont.querySelectorAll("[data-ver]").forEach((b) => (b.onclick = () => {
     const x = por(b.dataset.ver);
-    if (x.tipo === "relevamiento") abrirRelev(x.objeto_id); else abrirFicha(x.tipo, x.objeto_id);
+    abrirElemento(x.tipo, x.objeto_id);
   }));
   cont.querySelectorAll("[data-ok]").forEach((b) => (b.onclick = () => resolverPedido(Number(b.dataset.ok), true, nombreDe(por(b.dataset.ok)), false)));
   cont.querySelectorAll("[data-no]").forEach((b) => (b.onclick = () => resolverPedido(Number(b.dataset.no), false, nombreDe(por(b.dataset.no)), false)));
@@ -1174,8 +1186,8 @@ function pintarTabla() {
       <input id="t-buscar" type="search" placeholder="Buscar en la tabla" value="${esc(T.texto)}" aria-label="Buscar">
       <label class="t-check"><input type="checkbox" id="t-respetar" ${T.respetar ? "checked" : ""}> Respetar filtros y categorías</label>
       <span class="t-cuenta">${xs.length} fila${xs.length === 1 ? "" : "s"}${T.sel.size ? ` · ${T.sel.size} elegida${T.sel.size === 1 ? "" : "s"}` : ""}</span>
-      <button class="boton boton-chico" type="button" id="t-pdf" title="PDF A4 de las filas de la tabla, listo para imprimir">Exportar PDF</button>
-      <button class="boton boton-chico" type="button" id="t-excel">Exportar Excel</button>
+      ${tipo === "relevamiento" ? "" : `<button class="boton boton-chico" type="button" id="t-pdf" title="PDF A4 de las filas de la tabla, listo para imprimir">Exportar PDF</button>
+      <button class="boton boton-chico" type="button" id="t-excel">Exportar Excel</button>`}
       ${puede ? `<button class="boton boton-chico" type="button" id="t-importar" title="Subir un Excel exportado desde acá, con datos cambiados">Importar Excel</button>
         <input type="file" id="t-archivo" accept=".xlsx,.xls" hidden>` : ""}
       <button class="cerrar" type="button" id="t-cerrar" aria-label="Cerrar la tabla" title="Cerrar la tabla">✕</button>
@@ -1218,8 +1230,9 @@ function pintarTabla() {
     if (T.respetar) verTab("filtros"); // abre los filtros al costado para ajustarlos
     pintarTabla();
   };
-  $("#t-excel").onclick = (ev) => exportarExcel(T.capa, xs, ev.currentTarget);
-  $("#t-pdf").onclick = (ev) => hacerInforme(ev.currentTarget, T.capa, xs, T.respetar || !!T.texto);
+  // los informes son solo de estructuras y obras
+  if ($("#t-excel")) $("#t-excel").onclick = (ev) => exportarExcel(T.capa, xs, ev.currentTarget);
+  if ($("#t-pdf")) $("#t-pdf").onclick = (ev) => hacerInforme(ev.currentTarget, T.capa, xs, T.respetar || !!T.texto);
   const imp = $("#t-importar");
   if (imp) {
     imp.onclick = () => $("#t-archivo").click();
@@ -3482,8 +3495,10 @@ function abrirAgri(tipo, id) {
       </div>
     </div>
     <div class="ficha-bloque"><h2>Datos</h2><dl class="datos">${cuerpo}</dl>
-      ${tipo === "amoj" ? "" : `<p class="nota" style="margin:8px 0 0">«Vértices» copia la latitud y longitud de cada vértice, uno por renglón.</p>`}</div>`;
+      ${tipo === "amoj" ? "" : `<p class="nota" style="margin:8px 0 0">«Vértices» copia la latitud y longitud de cada vértice, uno por renglón.</p>`}</div>
+    ${bloqueBorrar(TIPO_DE_FICHA[tipo], x)}`;
   enlazarCerrar(ficha, cerrarFicha);
+  enlazarBorrar(ficha, TIPO_DE_FICHA[tipo], x);
   $("#copiar-coord", ficha).onclick = async () => {
     try { await navigator.clipboard.writeText(copiar); aviso(tipo === "amoj" ? "Coordenadas copiadas: " + copiar : "Vértices copiados"); }
     catch (e) { aviso("No se pudo copiar. " + copiar.replace(/\n/g, " · "), true); }
