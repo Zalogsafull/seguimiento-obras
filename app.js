@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-21";
+import { crearApi } from "./api.js?v=2026-11-23-22";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -117,14 +117,14 @@ const diasAtraso = (o) => Math.round((new Date(hoyLocal()) - new Date(String(o.f
 const fecha = (iso) => (iso ? new Date(iso + "T12:00:00").toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—");
 const normal = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-function aviso(texto, mal = false) {
+function aviso(texto, mal = false, ms = 0) {
   if (mal && /failed to fetch|networkerror|load failed|err_|se agotó el tiempo/i.test(texto))
     texto = "Sin conexión: no se pudo completar. Probá de nuevo cuando tengas señal.";
   const d = document.createElement("div");
   d.className = "aviso" + (mal ? " mal" : "");
   d.textContent = texto;
   $("#avisos").append(d);
-  setTimeout(() => d.remove(), mal ? 6000 : 2500);
+  setTimeout(() => d.remove(), ms || (mal ? 6000 : 2500));
 }
 
 // ------------------------------------------------------------ estado
@@ -431,6 +431,7 @@ async function entrarApp() {
   S.verificado = true;
   mostrarApp();
   await cargar();
+  limpiarCarpetasViejas().catch(anotarError);
 }
 
 function ponerUsuario() {
@@ -518,6 +519,7 @@ async function actualizar() {
       ponerUsuario();
     }
     await cargar();
+    limpiarCarpetasViejas().catch(anotarError);
   } finally {
     S.actualizando = false;
   }
@@ -650,6 +652,7 @@ const CAMPOS_EDITABLES = {
     ["Descripción", "descripcion", "Tipo", "descripcion"],
     ["D.O.", "director_obra", "Director de obra", "do"],
     ["Planos", "planos", "Planos (enlace a la carpeta)", "url"],
+    ["FECHA FIN", "fecha_fin", "Fin", "fecha"],
     ["FIN PREVISTO", "fin_previsto", "Fin previsto", "fecha"],
   ],
 };
@@ -1148,7 +1151,7 @@ const COLUMNAS_TABLA = {
     ["dias_para_recepcion", "Días a recepción", "num"], ["hitos", "Hitos hechos"], ["planos", "Planos"], ["observaciones", "Observaciones"]],
   obra: [["codigo", "Código"], ["etapa_nombre", "Etapa"], ["estado", "Situación", "estado"], ["sala", "Sala"], ["localidad", "Localidad"],
     ["departamento", "Departamento"], ["licitacion", "Licitación"], ["tarea", "Tarea"], ["descripcion", "Tipo"], ["director_obra", "D.O."],
-    ["fin_previsto", "Fin previsto", "fecha"], ["hitos", "Hitos hechos"], ["planos", "Planos"]],
+    ["fecha_fin", "Fin", "fecha"], ["fin_previsto", "Fin previsto", "fecha"], ["hitos", "Hitos hechos"], ["planos", "Planos"]],
   relevamiento: [["codigo", "Código"], ["descripcion", "Descripción"], ["lat", "Latitud", "num"], ["lon", "Longitud", "num"], ["z", "Z (m)", "num"]],
   amojonamiento: [["codigo", "Código"], ["descripcion", "Descripción"], ["lat", "Latitud", "num"], ["lon", "Longitud", "num"]],
   triangulo: [["codigo", "Código"], ["area", "Área (m²)", "num"], ["vertices", "Vértices", "num"]],
@@ -2141,10 +2144,11 @@ function pintarFicha(tipo, o, hitos, notas) {
        ["Inicio", fecha(o.fecha_inicio)], ["Fin", fecha(o.fecha_fin)], ["Recepción", o.recepcion || "—"],
        ["Fin previsto", fecha(o.fin_previsto)], ["Observaciones", o.observaciones]]
     : [["Sala", o.sala], ["Localidad", o.localidad], ["Departamento", o.departamento], ["Licitación", o.licitacion],
-       ["Tarea", o.tarea], ["Descripción", o.descripcion], ["Director de obra", o.director_obra], ["Fin previsto", fecha(o.fin_previsto)]];
+       ["Tarea", o.tarea], ["Descripción", o.descripcion], ["Director de obra", o.director_obra], ["Fin", fecha(o.fecha_fin)],
+       ["Fin previsto", fecha(o.fin_previsto)]];
   const boton = atajo;
   const enlaces = `<div class="atajos">
-      ${!o.planos && editor() && S.api.hayCarpetasDrive && o.codigo
+      ${!o.planos && editor() && S.api.hayCarpetasDrive && o.codigo && !carpetaVencida(o)
         ? `<button class="atajo" type="button" id="crear-carpeta" title="Crea la carpeta ${esc(o.codigo)} dentro de Estructuras en Drive y la deja en Planos">${ICONO.planos}<span>Crear carpeta</span></button>`
         : boton(o.planos, "planos", "Planos")}
       ${boton(o.lat != null ? `https://www.google.com/maps/dir/?api=1&destination=${o.lat}%2C${o.lon}&travelmode=driving` : "", "maps", "Maps")}
@@ -3126,6 +3130,47 @@ function usarGps() {
     aviso(err.code === 1 ? "No diste permiso para ver tu ubicación. Activalo en los permisos del navegador para este sitio."
       : "No se pudo obtener tu ubicación. Revisá que el GPS esté prendido.", true);
   }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+}
+
+// Un mes después de la FECHA FIN, la carpeta de planos se manda a la papelera de Drive (Drive la guarda
+// 30 días más). Lo hace la web cuando entra el administrador; si son muchas de golpe, pregunta antes.
+const DIAS_CARPETA = 30;
+const CLAVE_CARPETAS_OMITIDAS = "obras-carpetas-omitidas";
+const finMas = (o, dias) => { const d = new Date(o.fecha_fin + "T12:00:00"); d.setDate(d.getDate() + dias); return d; };
+const carpetaVencida = (o) => !!o.fecha_fin && finMas(o, DIAS_CARPETA) <= new Date();
+const esCarpetaDrive = (u) => /drive\.google\.com/i.test(u || "") && /[-\w]{25,}/.test(u || "");
+
+async function limpiarCarpetasViejas() {
+  if (!S.perfil?.admin || !S.api?.hayCarpetasDrive || S.limpiandoCarpetas || S.carpetasRevisadas) return;
+  S.carpetasRevisadas = true; // una vez por vez que se abre la web
+  const omitidas = new Set(leerJSON(CLAVE_CARPETAS_OMITIDAS) || []);
+  const todos = ["estructura", "obra"].flatMap((tipo) => (S.datos[tipo] || []).map((o) => ({ tipo, o })));
+  const enUso = new Set(todos.filter((x) => x.o.planos && !carpetaVencida(x.o)).map((x) => x.o.planos));
+  const van = todos.filter((x) => esCarpetaDrive(x.o.planos) && carpetaVencida(x.o) && !enUso.has(x.o.planos) && !omitidas.has(x.o.planos));
+  if (!van.length) return;
+  if (van.length > 5 && !confirm(`Hay ${van.length} estructuras u obras con FECHA FIN de hace más de un mes que todavía tienen carpeta de planos `
+    + `(${van.slice(0, 6).map((x) => x.o.codigo).join(", ")}${van.length > 6 ? "…" : ""}).\n\n`
+    + "¿Mandar esas carpetas a la papelera de Drive? Drive las guarda 30 días ahí por si hay que recuperarlas.")) return;
+  S.limpiandoCarpetas = true;
+  const hechas = [], problemas = [];
+  try {
+    for (const { tipo, o } of van) {
+      try {
+        const r = await S.api.carpetaAPapelera(o.planos);
+        if (r.ok || r.noEsta) { await S.api.guardarDatos(tipo, o.id, { [COLUMNA_PLANOS[tipo]]: null }); hechas.push(o.codigo); }
+        else { omitidas.add(o.planos); problemas.push(`${o.codigo}: ${r.omitida}`); }
+      } catch (e) { problemas.push(`${o.codigo}: ${e.message}`); if (/conectar|sesión|editores|script/i.test(e.message)) break; }
+    }
+  } finally {
+    S.limpiandoCarpetas = false;
+    escribirJSON(CLAVE_CARPETAS_OMITIDAS, [...omitidas]);
+  }
+  if (hechas.length) {
+    aviso(`${hechas.length === 1 ? "Se mandó 1 carpeta" : `Se mandaron ${hechas.length} carpetas`} de planos a la papelera de Drive `
+      + `(fin hace más de un mes): ${hechas.slice(0, 8).join(", ")}${hechas.length > 8 ? "…" : ""}`, false, 9000);
+    await cargar();
+  }
+  if (problemas.length) aviso(`No se pudieron mandar a la papelera: ${problemas.slice(0, 4).join("; ")}${problemas.length > 4 ? "…" : ""}`, true, 12000);
 }
 
 // Carpeta de planos en Drive para una estructura u obra nueva: se crea con el código dentro de «Estructuras»

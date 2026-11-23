@@ -10,7 +10,10 @@ const NEON_DATA_API = 'https://ep-young-snow-b64465yr.apirest.c-2.sa-east-1.aws.
 
 function doPost(e) {
   let r;
-  try { r = crearCarpeta(JSON.parse(e.postData.contents)); }
+  try {
+    const p = JSON.parse(e.postData.contents);
+    r = p.accion === 'papelera' ? aLaPapelera(p) : crearCarpeta(p);
+  }
   catch (err) { r = { error: String(err && err.message || err) }; }
   return ContentService.createTextOutput(JSON.stringify(r)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -42,6 +45,26 @@ function crearCarpeta(p) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Manda a la papelera la carpeta de planos de una estructura u obra terminada hace más de un mes.
+// Solo toca carpetas que estén directamente dentro de «Estructuras». Drive las guarda 30 días en la papelera.
+function aLaPapelera(p) {
+  editorDeLaWeb(p.token);
+  const m = String(p.url || '').match(/[-\w]{25,}/);
+  if (!m) return { omitida: 'el link de Planos no es de una carpeta de Drive' };
+  let f;
+  try { f = DriveApp.getFolderById(m[0]); }
+  catch (err) { return { omitida: 'no se encontró la carpeta en Drive', noEsta: true }; }
+  if (f.isTrashed()) return { ok: true, yaEstaba: true };
+  const padre = carpetaEstructuras().getId();
+  let dentro = false;
+  const ps = f.getParents();
+  while (ps.hasNext()) if (ps.next().getId() === padre) dentro = true;
+  if (!dentro) return { omitida: 'la carpeta no está dentro de Estructuras' };
+  try { f.setTrashed(true); }
+  catch (err) { return { omitida: 'Drive no dejó mandarla a la papelera (¿es de otra cuenta?)' }; }
+  return { ok: true };
 }
 
 // La sesión de la web se comprueba en Neon: cada usuario solo puede leer su propia fila de usuarios_web.

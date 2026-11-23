@@ -1,13 +1,19 @@
 // Capa de datos: Neon (Data API + Neon Auth) o modo demostración (?demo=1).
 import { NEON_AUTH_URL, NEON_DATA_API_URL, DRIVE_CARPETAS_URL } from "./config.js";
 
-// Pide al script de Google la carpeta de planos (la crea dentro de «Estructuras» o devuelve la que ya hay).
-async function pedirCarpeta(codigo, token) {
+// Script de Google (apps-script/carpetas_drive.gs): crea la carpeta de planos dentro de «Estructuras»
+// (o devuelve la que ya hay) y manda a la papelera las de obras terminadas hace más de un mes.
+async function llamarScript(cuerpo) {
   let r;
-  try { r = await fetch(DRIVE_CARPETAS_URL, { method: "POST", body: JSON.stringify({ codigo, token }) }); }
+  try { r = await fetch(DRIVE_CARPETAS_URL, { method: "POST", body: JSON.stringify(cuerpo) }); }
   catch { throw new Error("Carpeta en Drive: no se pudo conectar con Google. Creala con el botón «Crear carpeta» de la ficha."); }
-  const d = await r.json().catch(() => ({ error: "Respuesta rara de Google" }));
-  if (d.error || !d.url) throw new Error(`Carpeta en Drive: ${d.error || "no se pudo crear"}`);
+  const d = await r.json().catch(() => ({ error: "Respuesta rara de Google (¿se actualizó el script?)" }));
+  if (d.error) throw new Error(`Carpeta en Drive: ${d.error}`);
+  return d;
+}
+async function pedirCarpeta(codigo, token) {
+  const d = await llamarScript({ codigo, token });
+  if (!d.url) throw new Error("Carpeta en Drive: no se pudo crear");
   return d;
 }
 
@@ -134,6 +140,10 @@ async function crearNeon() {
       const token = (await neon.auth.getSession())?.data?.session?.token;
       return pedirCarpeta(codigo, token);
     },
+    async carpetaAPapelera(url) {
+      const token = (await neon.auth.getSession())?.data?.session?.token;
+      return llamarScript({ accion: "papelera", url, token });
+    },
     async crearPunto(capa, lat, lon, datos) {
       return chequear(await neon.rpc("crear_punto", { p_capa: capa, p_lat: lat, p_lon: lon, p_datos: datos }), "Agregar punto");
     },
@@ -197,7 +207,7 @@ function crearDemo() {
     E(6, "PBS", "FIN", 5, -32.4, -54.4, fin(700)),
     E(7, "R6E", "FIN", 5, -33.2, -54.9, fin(600)),
     E(8, "CO1", "FIN", 5, -34.4, -57.8, fin(200)),
-    E(9, "ATT", "FIN", 5, -34.9, -56.05, fin(800)),
+    E(9, "ATT", "FIN", 5, -34.9, -56.05, { ...fin(800), planos: "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345" }),
     E(10, "MRJ", "FIN", 6, -34.7, -55.95, { ...fin(900), recepcion: "RD" }),
   ];
   const obr = [
@@ -306,6 +316,7 @@ function crearDemo() {
     async elegirMiDO(ini) { await espera(); yo.iniciales_do = ini; Object.assign(cuentas.find((c) => c.user_id === "demo"), { iniciales_do: ini }); },
     async adminUsuarios() { await espera(); return structuredClone(cuentas); },
     hayCarpetasDrive: true,
+    async carpetaAPapelera() { await espera(); return { ok: true }; },
     async carpetaDrive(codigo) { await espera(); return { url: `https://drive.google.com/drive/folders/demo-${encodeURIComponent(codigo)}`, nueva: true }; },
     async crearPunto(capa, lat, lon, d) {
       await espera();
