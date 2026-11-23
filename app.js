@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-1";
+import { crearApi } from "./api.js?v=2026-11-23-2";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -931,6 +931,9 @@ async function prepararPDF() {
 }
 const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const txt = (v) => (v == null || v === "" ? "—" : String(v));
+// En los informes, la carpeta de planos va como la palabra «abrir» con el enlace detrás
+const ENLACE = Symbol("enlace");
+const enlace = (url) => ({ [ENLACE]: String(url || "").trim() });
 
 // Símbolo de QGIS dibujado en el PDF (triángulo, círculo, cuadrado o asterisco con su color)
 function simboloPDF(doc, f, x, y, r, color, borde) {
@@ -968,23 +971,23 @@ function armadoInforme(id) {
     fila: (o) => [o.codigo, o.descripcion, Number(o.lat).toFixed(6), Number(o.lon).toFixed(6), o.z == null || o.z === "" ? "—" : numero(o.z, 2)],
     anchos: { 1: { cellWidth: 110 } } };
   if (id === "obras") return { ...porEtapa,
-    cols: ["Código", "Sala", "Localidad", "Departamento", "Licitación", "Tarea", "D.O.", "Hitos hechos"],
-    fila: (o) => [o.codigo, o.sala, o.localidad, o.departamento, o.licitacion, o.tarea, o.director_obra, hitosTxt(o)] };
+    cols: ["Código", "Sala", "Localidad", "Departamento", "Licitación", "Tarea", "D.O.", "Hitos hechos", "Planos"],
+    fila: (o) => [o.codigo, o.sala, o.localidad, o.departamento, o.licitacion, o.tarea, o.director_obra, hitosTxt(o), enlace(o.planos)] };
   if (id === "recep" || id === "term_e") return { ...(id === "term_e"
       ? { grupo: (x) => CAT[x.cat].nombre, ordenar: (a, b) => ORDEN_CAT.indexOf(a.cat) - ORDEN_CAT.indexOf(b.cat) || diasOrden(a) - diasOrden(b) || porCodigo(a, b) }
       : porVencimiento),
-    cols: ["Código", "Estructura", "Licitación", "D.O.", "Fin de obra", "Vence la recepción", "Situación", "Recepción hecha"],
+    cols: ["Código", "Estructura", "Licitación", "D.O.", "Fin de obra", "Vence la recepción", "Situación", "Recepción hecha", "Planos"],
     fila: (o) => [o.codigo, o.estructura, o.licitacion, o.director_obra, fecha(o.fecha_fin), fecha(o.vence_recepcion), situacionRecepcion(o),
-      conDefinitiva(o) ? "Definitiva" : conProvisoria(o) ? "Provisoria" : "Ninguna"],
+      conDefinitiva(o) ? "Definitiva" : conProvisoria(o) ? "Provisoria" : "Ninguna", enlace(o.planos)],
     anchos: { 7: { fontStyle: "bold" } } };
   if (id === "est_todas") return { ...porEtapa,
-    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin", "Recepción", "Hitos hechos"],
-    fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), fecha(o.fecha_fin), o.recepcion, hitosTxt(o)] };
+    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin", "Recepción", "Hitos hechos", "Planos"],
+    fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), fecha(o.fecha_fin), o.recepcion, hitosTxt(o), enlace(o.planos)] };
   return { ...porEtapa,
-    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin previsto", "Hitos hechos", "Observaciones"],
+    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin previsto", "Hitos hechos", "Planos", "Observaciones"],
     fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio),
-      o.fin_previsto ? fecha(o.fin_previsto) + (atrasada(o) ? " (pasado)" : "") : "", hitosTxt(o), o.observaciones],
-    anchos: { 9: { cellWidth: 62 } } };
+      o.fin_previsto ? fecha(o.fin_previsto) + (atrasada(o) ? " (pasado)" : "") : "", hitosTxt(o), enlace(o.planos), o.observaciones],
+    anchos: { 10: { cellWidth: 62 } } };
 }
 
 // PDF de una capa con las filas dadas (las de la Tabla: capa, filtros y búsqueda)
@@ -1015,7 +1018,7 @@ async function hacerInforme(boton, id, filas, respetar) {
       doc.setFontSize(11); doc.setTextColor(60);
       doc.text("No hay nada para listar" + (respetar ? " con los filtros y categorías elegidos." : " en esta capa."), 12, 32);
     } else {
-      const body = [], meta = [];
+      const body = [], meta = [], enlaces = [];
       let actual;
       for (const x of xs) {
         const g = a.grupo(x);
@@ -1023,9 +1026,12 @@ async function hacerInforme(boton, id, filas, respetar) {
           actual = g;
           const n = xs.filter((z) => a.grupo(z) === g).length;
           body.push([{ content: `${g}  (${n})`, colSpan: cols.length, styles: { fillColor: [236, 238, 240], fontStyle: "bold", textColor: 30 } }]);
-          meta.push(null);
+          meta.push(null); enlaces.push(null);
         }
-        body.push([...(conSimbolo ? [""] : []), ...a.fila(x.o).map(txt)]);
+        const vals = a.fila(x.o), links = {};
+        vals.forEach((v, i) => { if (v && typeof v === "object" && ENLACE in v && v[ENLACE]) links[i + (conSimbolo ? 1 : 0)] = v[ENLACE]; });
+        body.push([...(conSimbolo ? [""] : []), ...vals.map((v) => (v && typeof v === "object" && ENLACE in v ? (v[ENLACE] ? "abrir" : "") : txt(v)))]);
+        enlaces.push(links);
         meta.push(conSimbolo ? { f: forma(x.tipo, x.o), color: CAT[x.cat].color, borde: CAT[x.cat].recepcion ? "#e0c200" : "#555555" } : null);
       }
       doc.autoTable({
@@ -1038,7 +1044,18 @@ async function hacerInforme(boton, id, filas, respetar) {
         headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: "bold" },
         columnStyles: { ...(conSimbolo ? { 0: { cellWidth: 7 }, 1: { fontStyle: "bold" } } : { 0: { fontStyle: "bold" } }), ...anchos },
         rowPageBreak: "avoid",
+        // «abrir» en azul; el enlace se agrega al dibujar la celda
+        didParseCell: (d) => {
+          if (d.section === "body" && enlaces[d.row.index]?.[d.column.index]) d.cell.styles.textColor = [26, 102, 190];
+        },
         didDrawCell: (d) => {
+          const url = d.section === "body" ? enlaces[d.row.index]?.[d.column.index] : null;
+          if (url) {
+            const p = d.cell.padding("left"), y = d.cell.y + d.cell.height / 2 + 1.2, ancho = doc.getTextWidth("abrir");
+            doc.setDrawColor(26, 102, 190); doc.setLineWidth(0.2);
+            doc.line(d.cell.x + p, y, d.cell.x + p + ancho, y);
+            doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url });
+          }
           const m = conSimbolo && d.section === "body" && d.column.index === 0 ? meta[d.row.index] : null;
           if (m) simboloPDF(doc, m.f, d.cell.x + d.cell.width / 2, d.cell.y + d.cell.height / 2, 1.7, m.color, m.borde);
         },
@@ -1337,7 +1354,15 @@ async function exportarExcel(id, xs, boton) {
     const cols = columnasExcel(capa.tipo);
     const filas = [cols.map((c) => c[0]), ...xs.map((x) => cols.map((c) => c[1](x) ?? null))];
     const hoja = XLSX.utils.aoa_to_sheet(filas, { cellDates: true, dateNF: "dd/mm/yyyy" });
-    hoja["!cols"] = cols.map(([t]) => ({ wch: t === "Observaciones" ? 40 : t === "Planos" ? 30 : Math.max(10, t.length + 2) }));
+    // Planos: la celda dice «abrir» y el enlace queda detrás (como en la Tabla de la web)
+    cols.forEach(([, , , clase], c) => {
+      if (clase !== "url") return;
+      xs.forEach((x, r) => {
+        const ref = XLSX.utils.encode_cell({ r: r + 1, c }), url = hoja[ref]?.v;
+        if (url) hoja[ref] = { t: "s", v: "abrir", l: { Target: String(url), Tooltip: String(url) } };
+      });
+    });
+    hoja["!cols"] = cols.map(([t]) => ({ wch: t === "Observaciones" ? 40 : Math.max(10, t.length + 2) }));
     hoja["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: filas.length - 1, c: cols.length - 1 } }) };
     hoja["!freeze"] = { xSplit: 2, ySplit: 1 };
     const editables = cols.filter((c) => c[2]).map((c) => c[0]);
@@ -1350,6 +1375,7 @@ async function exportarExcel(id, xs, boton) {
       ["Cómo usar este archivo"],
       ["1. Podés cambiar los valores de estas columnas:", editables.join(", ") || "(ninguna: esta capa no se edita desde la web)"],
       ["2. No cambies la columna ID: es la que identifica cada fila en la base."],
+      ["   En Planos la celda dice «abrir» y el enlace está detrás (Ctrl+clic para abrir la carpeta). Para cambiarlo, editá el hipervínculo o escribí el enlace nuevo en la celda."],
       ["3. Las demás columnas (Código, Etapa, vencimientos, hitos) son informativas: si las cambiás, no pasa nada."],
       ["4. Situación: PROY (proyecto), CONS (en obra) o FIN (terminada). Recepción: RP, RD, PD o PR."],
       ["5. Guardá el archivo y en la web andá a Tabla > Importar Excel. Antes de guardar te muestra la lista de cambios."],
@@ -1410,7 +1436,9 @@ async function importarExcel(archivo) {
     const nombre = libro.SheetNames.find((n) => n !== "Leeme");
     const tipo = nombre === "Obras" ? "obra" : nombre === "Estructuras" ? "estructura" : null;
     if (!tipo) throw new Error("Este archivo no es un Excel exportado desde la web (o es de Relevamiento, que no se puede importar).");
-    const filas = XLSX.utils.sheet_to_json(libro.Sheets[nombre], { header: 1, raw: true, defval: null });
+    const ws = libro.Sheets[nombre];
+    const filas = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true });
+    const r0 = XLSX.utils.decode_range(ws["!ref"] || "A1").s.r;
     const titulos = (filas[0] || []).map((t) => String(t ?? "").trim());
     const iId = titulos.indexOf("ID");
     if (iId < 0) throw new Error("Falta la columna ID.");
@@ -1419,14 +1447,21 @@ async function importarExcel(archivo) {
     const porId = new Map(S.datos[tipo].map((o) => [o.id, o]));
     const cambios = [], problemas = [];
     let sinId = 0;
-    for (const f of filas.slice(1)) {
+    for (const [n, f] of filas.entries()) {
+      if (n === 0) continue;
       if (!f || f.every((v) => v == null || v === "")) continue;
       const id = Number(f[iId]), o = porId.get(id);
       if (!o) { sinId++; continue; }
       const c = {}, detalle = [];
       for (const col of cols) {
         let v;
-        try { v = normalizarExcel(f[col.i], col.clase); }
+        let bruto = f[col.i];
+        if (col.clase === "url") {
+          const celda = ws[XLSX.utils.encode_cell({ r: r0 + n, c: col.i })];
+          if (celda?.l?.Target) bruto = celda.l.Target;            // «abrir» con su enlace detrás
+          else if (/^abrir$/i.test(String(bruto ?? "").trim())) continue; // perdió el enlace: no se toca
+        }
+        try { v = normalizarExcel(bruto, col.clase); }
         catch (e) { problemas.push(`${o.codigo} · ${col.titulo}: ${e.message}`); continue; }
         if (!igualBase(o[col.k], v, col.clase)) {
           c[col.col] = v;
