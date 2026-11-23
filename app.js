@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-7";
+import { crearApi } from "./api.js?v=2026-11-23-8";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -870,13 +870,15 @@ async function resolverPedido(id, aprobar, cod, desdeFicha) {
 }
 // Pedidos pendientes: el administrador los ve en Ajustes y con un número en el botón
 async function cargarSolicitudes() {
-  try { S.solicitudes = (await conTiempo(S.api.solicitudes(), 20000)) || []; }
-  catch (e) { S.solicitudes = S.solicitudes || []; return; }
-  const n = S.perfil?.admin ? S.solicitudes.length : 0;
+  try {
+    const [sol, cf] = await conTiempo(Promise.all([S.api.solicitudes(), S.api.cambiosForma ? S.api.cambiosForma() : []]), 20000);
+    S.solicitudes = sol || []; S.cambiosForma = cf || [];
+  } catch (e) { S.solicitudes = S.solicitudes || []; S.cambiosForma = S.cambiosForma || []; return; }
+  const n = S.perfil?.admin ? S.solicitudes.length + S.cambiosForma.length : 0;
   insignia("ajustes", n);
   if (n && !S.avisoSolicitudes) {
     S.avisoSolicitudes = true;
-    aviso(`Tenés ${n} pedido${n > 1 ? "s" : ""} para borrar algo. Miralo${n > 1 ? "s" : ""} en Ajustes.`);
+    aviso(`Tenés ${n} pedido${n > 1 ? "s" : ""} para revisar (borrar o cambiar algo). Miralo${n > 1 ? "s" : ""} en Ajustes.`);
   }
   if (UI.modo === "ajustes" && !UI.plegado) pintarAjustes();
 }
@@ -884,13 +886,26 @@ function pintarSolicitudes() {
   const cont = $("#ajustes-solicitudes");
   if (!cont) return;
   const lista = S.perfil?.admin ? (S.solicitudes || []) : [];
-  cont.hidden = !lista.length;
-  if (!lista.length) return;
+  const formas = S.perfil?.admin ? (S.cambiosForma || []) : [];
+  cont.hidden = !lista.length && !formas.length;
+  if (!lista.length && !formas.length) return;
   const nombreDe = (x) => {
     const o = S.datos[DATOS_DE_TIPO[x.tipo] || x.tipo]?.find((y) => y.id === x.objeto_id);
     return (o ? nombreBorrar(x.tipo, o) : x.codigo || "Sin código") + " · " + NOMBRE_TIPO[x.tipo];
   };
-  cont.innerHTML = `<h3>Pedidos para borrar <span class="cuenta">${lista.length}</span></h3>
+  const nombreForma = (c) => {
+    const o = S.datos[DATOS_DE_TIPO[c.tipo]]?.find((y) => y.id === c.objeto_id);
+    return (o ? nombreBorrar(c.tipo, o) : c.codigo || "Sin código") + " · " + NOMBRE_TIPO[c.tipo];
+  };
+  cont.innerHTML = `${formas.length ? `<h3>Cambios de forma <span class="cuenta">${formas.length}</span></h3>
+    ${formas.map((c) => `<div class="pedido">
+      <p><b>${esc(nombreForma(c))}</b><br><small>${esc(c.pedido_nombre || "")} · ${fecha(String(c.creado).slice(0, 10))} · ${c.vertices.length} vértices</small></p>
+      <div class="acciones">
+        <button class="boton boton-chico" type="button" data-fver="${c.id}">Ver</button>
+        <button class="boton boton-chico boton-primario" type="button" data-fok="${c.id}">Aprobar</button>
+        <button class="boton boton-chico" type="button" data-fno="${c.id}">Rechazar</button>
+      </div></div>`).join("")}` : ""}
+    ${lista.length ? `<h3>Pedidos para borrar <span class="cuenta">${lista.length}</span></h3>
     ${lista.map((x) => `<div class="pedido">
       <p><b>${esc(nombreDe(x))}</b><br><small>${esc(x.pedido_nombre || "")} · ${fecha(String(x.creado).slice(0, 10))}</small>
       ${x.motivo ? `<br><span>"${esc(x.motivo)}"</span>` : ""}</p>
@@ -898,7 +913,11 @@ function pintarSolicitudes() {
         <button class="boton boton-chico" type="button" data-ver="${x.id}">Ver</button>
         <button class="boton boton-chico boton-peligro" type="button" data-ok="${x.id}">Aprobar y borrar</button>
         <button class="boton boton-chico" type="button" data-no="${x.id}">Rechazar</button>
-      </div></div>`).join("")}`;
+      </div></div>`).join("")}` : ""}`;
+  const porF = (id) => formas.find((c) => c.id === Number(id));
+  cont.querySelectorAll("[data-fver]").forEach((b) => (b.onclick = () => { const c = porF(b.dataset.fver); abrirElemento(c.tipo, c.objeto_id); }));
+  cont.querySelectorAll("[data-fok]").forEach((b) => (b.onclick = () => resolverCambioForma(Number(b.dataset.fok), true, nombreForma(porF(b.dataset.fok)))));
+  cont.querySelectorAll("[data-fno]").forEach((b) => (b.onclick = () => resolverCambioForma(Number(b.dataset.fno), false, nombreForma(porF(b.dataset.fno)))));
   const por = (id) => lista.find((x) => x.id === Number(id));
   cont.querySelectorAll("[data-ver]").forEach((b) => (b.onclick = () => {
     const x = por(b.dataset.ver);
@@ -3412,9 +3431,10 @@ function pintarAgrimensura() {
   for (const g of Object.values(AG.capas)) g.clearLayers();
   if (!agriDeCerca()) return;
   const ab = S.abierta || {};
+  const editando = (capa, id) => DIB.activo && DIB.editar && DIB.destino === capa && DIB.editar.id === id;
   if (S.capaOn.padr) for (const p of S.datos.padr || []) {
     const ll = anillosDe(p);
-    if (!ll) continue;
+    if (!ll || editando("padron", p.id)) continue;
     const sel = ab.tipo === "padr" && ab.id === p.id;
     const pol = L.polygon(ll, { renderer: AG.renderer, pane: "agri", color: sel ? "#6CC4D1" : COLOR_PADRON, weight: sel ? 3 : 1,
       fill: true, fillOpacity: 0, bubblingMouseEvents: false })
@@ -3424,13 +3444,16 @@ function pintarAgrimensura() {
   }
   if (S.capaOn.tri) for (const t of S.datos.tri || []) {
     const ll = anillosDe(t);
-    if (!ll) continue;
+    if (!ll || editando("triangulo", t.id)) continue;
     const usable = normal(t.codigo) === "DC", sel = ab.tipo === "tri" && ab.id === t.id;
     L.polygon(ll, { renderer: AG.renderer, pane: "agri", color: sel ? "#6CC4D1" : COLOR_TRI, weight: sel ? 3 : usable ? 1.8 : 1,
       fill: true, fillColor: COLOR_TRI, fillOpacity: 0, className: usable ? "tri-usable" : "", bubblingMouseEvents: false })
       .on("click", (ev) => tocarAgri(ev, () => abrirAgri("tri", t.id))).addTo(AG.capas.tri);
   }
   ponerRayado();
+  const tipoAb = TIPO_DE_FICHA[ab.tipo], prop = tipoAb && !DIB.activo ? cambioDe(tipoAb, ab.id) : null;
+  if (prop) L.polygon(prop.vertices.map(([lon, lat]) => [lat, lon]), { renderer: AG.renderer, pane: "agri", color: "#f08a24",
+    weight: 2.5, dashArray: "6 4", fill: false, interactive: false }).addTo(AG.capas.tri);
   // mientras se dibuja un polígono, los mojones se ven siempre (para engancharse a ellos)
   if (S.capaOn.amoj || DIB.activo) for (const m of S.datos.amoj || []) {
     if (m.lat == null || m.lon == null) continue;
@@ -3496,15 +3519,68 @@ function abrirAgri(tipo, id) {
     </div>
     <div class="ficha-bloque"><h2>Datos</h2><dl class="datos">${cuerpo}</dl>
       ${tipo === "amoj" ? "" : `<p class="nota" style="margin:8px 0 0">«Vértices» copia la latitud y longitud de cada vértice, uno por renglón.</p>`}</div>
+    ${tipo === "amoj" ? "" : bloqueForma(TIPO_DE_FICHA[tipo], x, titulo)}
     ${bloqueBorrar(TIPO_DE_FICHA[tipo], x)}`;
   enlazarCerrar(ficha, cerrarFicha);
   enlazarBorrar(ficha, TIPO_DE_FICHA[tipo], x);
+  if (tipo !== "amoj") enlazarForma(ficha, TIPO_DE_FICHA[tipo], x, titulo);
   $("#copiar-coord", ficha).onclick = async () => {
     try { await navigator.clipboard.writeText(copiar); aviso(tipo === "amoj" ? "Coordenadas copiadas: " + copiar : "Vértices copiados"); }
     catch (e) { aviso("No se pudo copiar. " + copiar.replace(/\n/g, " · "), true); }
   };
   pintar();
-  if (window.innerWidth > 760) S.mapa.panTo(centro);
+  // si el mapa está lejos (no se vería), se acerca al elemento; si no, en la PC se centra
+  if (!agriDeCerca()) {
+    const ll = tipo === "amoj" ? null : anillosDe(x);
+    const b = ll ? L.latLngBounds(ll.flat(2)) : L.latLngBounds([centro, centro]);
+    const tapa = movil.matches ? Math.min(ficha.offsetHeight, S.mapa.getSize().y * 0.55) : 0;
+    S.mapa.fitBounds(b, { maxZoom: 18, paddingTopLeft: [60, 60], paddingBottomRight: [60, tapa + 30] });
+  } else if (window.innerWidth > 760) S.mapa.panTo(centro);
+}
+
+// ------------------------------------------------------------ cambiar la forma de un polígono (con aprobación)
+const cambioDe = (tipo, id) => (S.cambiosForma || []).find((c) => c.tipo === tipo && c.objeto_id === id);
+function bloqueForma(tipo, x, nombre) {
+  if (!editor()) return "";
+  const c = cambioDe(tipo, x.id);
+  let cuerpo;
+  if (c && S.perfil?.admin) {
+    cuerpo = `<p class="nota" style="margin:0 0 10px">${esc(c.pedido_nombre || "Alguien")} pidió cambiar la forma: queda con ${c.vertices.length} vértices${
+      c.datos && (c.datos["CÓDIGO"] !== undefined || c.datos.PADRON !== undefined) ? ` y ${tipo === "padron" ? "número" : "código"} «${esc((tipo === "padron" ? c.datos.PADRON : c.datos["CÓDIGO"]) || "vacío")}»` : ""}.
+      En el mapa, la forma propuesta se ve en naranja.</p>
+      <div class="acciones"><button class="boton boton-primario" type="button" data-forma="${c.id}" data-aprobar="1">Aprobar cambio</button>
+      <button class="boton" type="button" data-forma="${c.id}" data-aprobar="0">Rechazar</button></div>`;
+  } else if (c && c.mia) {
+    cuerpo = `<p class="nota" style="margin:0 0 10px">Pediste un cambio de forma. Queda así hasta que un administrador lo apruebe o lo rechace. En el mapa se ve en naranja.</p>
+      <button class="boton" type="button" id="editar-forma">Corregir mi pedido</button>`;
+  } else {
+    cuerpo = `<button class="boton" type="button" id="editar-forma">Editar forma y datos</button>
+      <p class="nota" style="margin:8px 0 0">Mover, agregar o sacar vértices y cambiar el ${tipo === "padron" ? "número de padrón" : "código"}.${S.perfil?.admin ? "" : " Lo aprueba un administrador."}</p>`;
+  }
+  return `<div class="ficha-bloque"><h2>Forma</h2>${cuerpo}</div>`;
+}
+function enlazarForma(ficha, tipo, x, nombre) {
+  const b = $("#editar-forma", ficha);
+  if (b) b.onclick = () => {
+    const c = cambioDe(tipo, x.id);
+    // si había un pedido mío, se sigue desde la forma que pedí
+    const anillo = c ? c.vertices.map(([lon, lat]) => [lat, lon]) : (anillosDe(x) || [[[]]])[0][0].slice(0, -1);
+    const datos = tipo === "padron" ? { PADRON: x.padron ?? "" } : { "CÓDIGO": x.codigo ?? "" };
+    if (c?.datos) Object.assign(datos, c.datos);
+    cerrarFicha();
+    abrirDibujo(tipo, anillo.map(([lat, lon]) => ({ lat, lon })), datos, { id: x.id, nombre });
+  };
+  ficha.querySelectorAll("[data-forma]").forEach((bt) => (bt.onclick = () => resolverCambioForma(Number(bt.dataset.forma), bt.dataset.aprobar === "1", nombre)));
+}
+async function resolverCambioForma(id, aprobar, nombre) {
+  if (aprobar && !confirm(`¿Aprobar el cambio de ${nombre}? Se cambia para todos (web, QGIS y QField); la forma anterior queda de respaldo.`)) return;
+  try {
+    await S.api.resolverForma(id, aprobar);
+    aviso(aprobar ? `${nombre}: cambio aprobado` : "Cambio rechazado");
+    await cargar();
+    await cargarSolicitudes();
+    if (S.abierta && (S.abierta.tipo === "tri" || S.abierta.tipo === "padr")) abrirAgri(S.abierta.tipo, S.abierta.id);
+  } catch (e) { aviso(e.message, true); }
 }
 
 function pintarUtilidadAgri() {
@@ -3521,7 +3597,9 @@ function pintarUtilidadAgri() {
 // ------------------------------------------------------------ dibujar un polígono (Triángulos o Padrones)
 // Cada toque en el mapa agrega un vértice. Cerca de un mojón (o de un vértice de otro polígono)
 // se engancha a él; si no, queda como punto extra. Los vértices se arrastran para corregirlos.
-const DIB = { activo: false, destino: "triangulo", v: [], datos: {}, tocado: false, grupo: null };
+const DIB = { activo: false, destino: "triangulo", v: [], datos: {}, tocado: false, grupo: null, editar: null, pasos: [] };
+// antes de cada cambio se guarda cómo estaba, para «Deshacer»
+function guardarPaso() { DIB.pasos.push(DIB.v.map((p) => ({ ...p }))); if (DIB.pasos.length > 60) DIB.pasos.shift(); }
 const RADIO_ENGANCHE = 24; // píxeles
 
 function candidatoMojon(m) { return { lat: m.lat, lon: m.lon, mojon: m.id, codigo: m.codigo || "" }; }
@@ -3541,17 +3619,19 @@ function enganche(ll) {
   return mejor;
 }
 
-function abrirDibujo(destino = "triangulo", verts = [], datos = {}) {
+// editar = { id, nombre } para cambiar la forma de un polígono que ya existe
+function abrirDibujo(destino = "triangulo", verts = [], datos = {}, editar = null) {
   if (!editor()) return aviso("Solo un usuario con permiso de editor puede agregar polígonos.", true);
   if (MED.activo) terminarMedida();
   quitarMarcasPegar(); PG.lote = null;
   if (!$("#nuevo").hidden) cerrarNuevo();
   $("#ficha").hidden = true; $("#admin").hidden = true;
-  Object.assign(DIB, { activo: true, destino, datos: { ...datos }, tocado: Object.keys(datos).length > 0 });
+  Object.assign(DIB, { activo: true, destino, datos: { ...datos }, tocado: Object.keys(datos).length > 0, editar, pasos: [] });
   DIB.v = verts.map((p) => {
     const m = (S.datos.amoj || []).find((x) => distM(x, p) < 0.5);
     return m ? candidatoMojon(m) : { lat: p.lat, lon: p.lon, mojon: null };
   });
+  DIB.original = DIB.v.map((p) => ({ ...p }));
   DIB.grupo = L.layerGroup().addTo(S.mapa);
   S.mapa.off("click", clickDibujo).on("click", clickDibujo);
   $("#mapa").classList.add("modo-nuevo");
@@ -3564,6 +3644,7 @@ function abrirDibujo(destino = "triangulo", verts = [], datos = {}) {
 
 function terminarDibujo() {
   DIB.activo = false;
+  DIB.editar = null;
   DIB.grupo?.remove(); DIB.grupo = null;
   S.mapa.off("click", clickDibujo);
   $("#mapa").classList.remove("modo-nuevo");
@@ -3572,14 +3653,27 @@ function terminarDibujo() {
 }
 
 function clickDibujo(ev) { if (!MED.activo) agregarVertice(ev.latlng); }
+// índice donde insertar un punto para que quede en el lado del polígono más cercano
+function ladoCercano(ll) {
+  const p = S.mapa.latLngToContainerPoint(ll);
+  let mejor = DIB.v.length, dmin = Infinity;
+  DIB.v.forEach((a, i) => {
+    const b = DIB.v[(i + 1) % DIB.v.length];
+    const d = L.LineUtil.pointToSegmentDistance(p, S.mapa.latLngToContainerPoint([a.lat, a.lon]), S.mapa.latLngToContainerPoint([b.lat, b.lon]));
+    if (d < dmin) { dmin = d; mejor = i + 1; }
+  });
+  return mejor;
+}
 
 function agregarVertice(ll, cand) {
   const c = cand || enganche(ll) || { lat: ll.lat, lon: ll.lng, mojon: null };
   const ult = DIB.v[DIB.v.length - 1];
   if (ult && distM(ult, c) < 0.05) return; // el mismo punto dos veces seguidas
   // tocar de nuevo el primer vértice cierra el polígono: no hace falta repetirlo
-  if (DIB.v.length >= 3 && distM(DIB.v[0], c) < 0.05) return cerrarPoligono();
-  DIB.v.push(c);
+  if (DIB.v.length >= 3 && distM(DIB.v[0], c) < 0.05) return DIB.editar ? null : cerrarPoligono();
+  guardarPaso();
+  if (DIB.editar && DIB.v.length >= 3) DIB.v.splice(ladoCercano(L.latLng(c.lat, c.lon)), 0, c);
+  else DIB.v.push(c);
   sugerirCodigo();
   dibujarDibujo();
   actualizarMedidas();
@@ -3618,11 +3712,14 @@ function dibujarDibujo() {
       icon: L.divIcon({ className: cls, html: `<span>${i + 1}</span>`, iconSize: [22, 22], iconAnchor: [11, 11] }) });
     mk.on("click", (ev) => {
       L.DomEvent.stopPropagation(ev);
-      if (i === 0 && DIB.v.length >= 3) return cerrarPoligono();
+      if (i === 0 && DIB.v.length >= 3 && !DIB.editar) return cerrarPoligono();
+      if (DIB.editar && DIB.v.length <= 3) return aviso("Un polígono necesita al menos 3 vértices: mové este en lugar de sacarlo.", true);
+      guardarPaso();
       DIB.v.splice(i, 1);
       aviso(`Vértice ${i + 1} quitado`);
       dibujarDibujo(); actualizarMedidas();
     });
+    mk.on("dragstart", guardarPaso);
     mk.on("drag", (ev) => {
       const q = ev.target.getLatLng();
       DIB.v[i] = { lat: q.lat, lon: q.lng, mojon: null };
@@ -3636,6 +3733,22 @@ function dibujarDibujo() {
     });
     mk.addTo(DIB.grupo);
   });
+  // «+» en la mitad de cada lado: tocarlo agrega un vértice ahí; arrastrarlo, donde lo sueltes
+  if (DIB.v.length >= 3 || (DIB.editar && DIB.v.length >= 2)) DIB.v.forEach((a, i) => {
+    if (!DIB.editar && i === DIB.v.length - 1) return; // al dibujar, el último lado todavía no existe
+    const b = DIB.v[(i + 1) % DIB.v.length];
+    const medio = L.latLng((a.lat + b.lat) / 2, (a.lon + b.lon) / 2);
+    const mk = L.marker(medio, { draggable: true, keyboard: false, zIndexOffset: 2900, title: "Agregar un vértice acá",
+      icon: L.divIcon({ className: "vertice-medio", html: "<span>+</span>", iconSize: [18, 18], iconAnchor: [9, 9] }) });
+    const insertar = (ll) => {
+      guardarPaso();
+      DIB.v.splice(i + 1, 0, enganche(ll) || { lat: ll.lat, lon: ll.lng, mojon: null });
+      dibujarDibujo(); actualizarMedidas();
+    };
+    mk.on("click", (ev) => { L.DomEvent.stopPropagation(ev); insertar(medio); });
+    mk.on("dragend", (ev) => insertar(ev.target.getLatLng()));
+    mk.addTo(DIB.grupo);
+  });
 }
 
 function actualizarMedidas() {
@@ -3644,7 +3757,8 @@ function actualizarMedidas() {
   const n = DIB.v.length, md = medidasDe(DIB.v), enMojon = DIB.v.filter((p) => p.mojon).length;
   el.innerHTML = n === 0 ? "Todavía no hay vértices: tocá el mapa."
     : `<b>${n} ${n === 1 ? "vértice" : "vértices"}</b>${enMojon ? ` (${enMojon} en mojones)` : ""}${n >= 3 ? ` · área ${areaTxt(md.area)} · perímetro ${numero(md.perimetro, 1)} m` : n === 2 ? ` · ${numero(md.perimetro, 1)} m` : ""}`;
-  $("#dib-deshacer").disabled = $("#dib-borrar").disabled = n === 0;
+  $("#dib-deshacer").disabled = !DIB.pasos.length;
+  $("#dib-borrar").disabled = DIB.editar ? !DIB.pasos.length : n === 0;
   $("#dib-guardar").disabled = n < 3;
   $("#dib-zoom").hidden = agriDeCerca();
 }
@@ -3656,25 +3770,28 @@ function listaCodigosAgri() {
 }
 
 function pintarDibujo() {
-  const caja = $("#nuevo"), tri = DIB.destino === "triangulo";
+  const caja = $("#nuevo"), tri = DIB.destino === "triangulo", ed = DIB.editar;
+  const admin = !!S.perfil?.admin;
   caja.innerHTML = `
-    <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Dibujar polígono</h2>
-      <p class="nota" style="margin:0">Tocá el mapa para marcar cada vértice. Cerca de un mojón, el vértice se engancha a él (rojo); en otro lugar queda como punto extra (blanco). Arrastrá un vértice para moverlo o tocalo para sacarlo. Tocá el 1 para cerrar.</p></div>
+    <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">${ed ? `Editar ${esc(ed.nombre)}` : "Dibujar polígono"}</h2>
+      <p class="nota" style="margin:0">${ed
+        ? "Arrastrá un vértice para moverlo y tocalo para sacarlo. Para agregar uno, tocá el + en la mitad de un lado (o arrastralo), o tocá el mapa cerca del lado. Cerca de un mojón, el vértice se engancha a él. Nada se guarda hasta que aceptes."
+        : "Tocá el mapa para marcar cada vértice. Cerca de un mojón, el vértice se engancha a él (rojo); en otro lugar queda como punto extra (blanco). Arrastrá un vértice para moverlo o tocalo para sacarlo. Tocá el 1 para cerrar."}</p></div>
     <form class="form" id="form-dibujo" novalidate>
-      <div class="ficha-bloque">
+      ${ed ? "" : `<div class="ficha-bloque">
         <h2>Capa</h2>
         <div class="segmentado" role="radiogroup">
           <label><input type="radio" name="destino" value="triangulo" ${tri ? "checked" : ""}> Triángulos</label>
           <label><input type="radio" name="destino" value="padron" ${tri ? "" : "checked"}> Padrones</label>
         </div>
-      </div>
+      </div>`}
       <div class="ficha-bloque">
         <h2>Vértices</h2>
         <p class="nota" id="dib-medidas" style="margin:0 0 8px"></p>
         <p class="nota" id="dib-zoom" hidden style="margin:0 0 8px">Acercate en el mapa para ver los mojones: se muestran desde 1:15.000. <button type="button" class="enlace" id="dib-acercar">Acercar</button></p>
         <div class="dos">
-          <button class="boton" type="button" id="dib-deshacer">Deshacer último</button>
-          <button class="boton" type="button" id="dib-borrar">Borrar todos</button>
+          <button class="boton" type="button" id="dib-deshacer">Deshacer</button>
+          <button class="boton" type="button" id="dib-borrar">${ed ? "Volver a como estaba" : "Borrar todos"}</button>
         </div>
         <details class="dib-coords">
           <summary>Cargar vértices desde coordenadas (Excel)</summary>
@@ -3690,7 +3807,8 @@ function pintarDibujo() {
       </div>
       <div class="ficha-bloque acciones-nuevo">
         <p class="error" id="dib-error" hidden></p>
-        <button class="boton boton-primario" type="submit" id="dib-guardar">Guardar ${tri ? "triángulo" : "padrón"}</button>
+        <button class="boton boton-primario" type="submit" id="dib-guardar">${ed ? (admin ? "Aceptar cambios" : "Enviar cambio para aprobar") : `Guardar ${tri ? "triángulo" : "padrón"}`}</button>
+        ${ed && !admin ? `<p class="nota" style="margin:0">El cambio queda pendiente hasta que un administrador lo apruebe.</p>` : ""}
         <button class="boton" type="button" id="dib-cancelar">Cancelar</button>
       </div>
     </form>`;
@@ -3700,8 +3818,11 @@ function pintarDibujo() {
   f.querySelectorAll("input[name=destino]").forEach((r) => (r.onchange = () => { DIB.destino = r.value; pintarDibujo(); }));
   if (f.codigo) f.codigo.oninput = () => { DIB.tocado = true; DIB.datos["CÓDIGO"] = f.codigo.value.trim(); };
   if (f.padron) f.padron.oninput = () => { DIB.datos.PADRON = f.padron.value.trim(); };
-  $("#dib-deshacer").onclick = () => { DIB.v.pop(); dibujarDibujo(); actualizarMedidas(); };
-  $("#dib-borrar").onclick = () => { if (confirm("¿Borrar todos los vértices dibujados?")) { DIB.v = []; dibujarDibujo(); actualizarMedidas(); } };
+  $("#dib-deshacer").onclick = () => { if (DIB.pasos.length) DIB.v = DIB.pasos.pop(); dibujarDibujo(); actualizarMedidas(); };
+  $("#dib-borrar").onclick = () => {
+    if (ed) { guardarPaso(); DIB.v = DIB.original.map((p) => ({ ...p })); dibujarDibujo(); actualizarMedidas(); return; }
+    if (confirm("¿Borrar todos los vértices dibujados?")) { guardarPaso(); DIB.v = []; dibujarDibujo(); actualizarMedidas(); }
+  };
   $("#dib-acercar").onclick = () => S.mapa.setZoom(ZOOM_AGRI);
   $("#dib-cargar").onclick = () => {
     const pts = leerListaCoordenadas($("#dib-texto").value), err = $("#dib-error-coord");
@@ -3710,6 +3831,7 @@ function pintarDibujo() {
     if (verts.length < 1) { err.textContent = "No encontré coordenadas en Uruguay en lo pegado."; err.hidden = false; return; }
     err.hidden = true;
     if (DIB.v.length && !confirm(`¿Reemplazar los ${DIB.v.length} vértices dibujados por los ${verts.length} pegados?`)) return;
+    guardarPaso();
     const nro = $("#dib-texto").value.match(/padr[oó]n\D{0,6}(\d{1,7})/i);
     if (nro && !tri) { DIB.datos.PADRON = nro[1]; f.padron.value = nro[1]; }
     DIB.v = verts.map((p) => { const m = (S.datos.amoj || []).find((x) => distM(x, p) < 0.5); return m ? candidatoMojon(m) : { ...p, mojon: null }; });
@@ -3722,8 +3844,11 @@ function pintarDibujo() {
 }
 
 function salirDibujo() {
-  if (DIB.v.length >= 2 && !confirm("¿Salir sin guardar el polígono dibujado?")) return;
+  const cambio = DIB.editar ? DIB.pasos.length > 0 : DIB.v.length >= 2;
+  if (cambio && !confirm(DIB.editar ? "¿Salir sin guardar los cambios?" : "¿Salir sin guardar el polígono dibujado?")) return;
+  const ed = DIB.editar;
   terminarDibujo();
+  if (ed) abrirAgri(DIB.destino === "padron" ? "padr" : "tri", ed.id);
 }
 
 async function guardarDibujo(ev) {
@@ -3738,10 +3863,13 @@ async function guardarDibujo(ev) {
     const n = f.padron.value.trim();
     if (n && !/^\d{1,9}$/.test(n)) { f.padron.focus(); return mal("El número de padrón tiene que ser un número entero, sin puntos."); }
     if (n) datos.PADRON = n;
-    if (n && S.datos.padr.some((p) => String(p.padron) === n) && !confirm(`Ya hay un padrón ${n}. ¿Lo agrego igual?`)) return;
+    if (n && S.datos.padr.some((p) => String(p.padron) === n && p.id !== DIB.editar?.id) && !confirm(`Ya hay un padrón ${n}. ¿Lo guardo igual?`)) return;
+    if (DIB.editar) datos.PADRON = n; // al editar, vacío borra el número
   }
-  b.disabled = true; b.textContent = "Guardando…";
+  if (DIB.editar && DIB.destino === "triangulo") datos["CÓDIGO"] = f.codigo.value.trim();
   const destino = DIB.destino;
+  if (DIB.editar) return aceptarEdicion(datos, b, mal);
+  b.disabled = true; b.textContent = "Guardando…";
   try {
     const id = await S.api.crearPoligono(destino, DIB.v.map((p) => [p.lon, p.lat]), datos);
     aviso(destino === "padron" ? `Padrón ${datos.PADRON || ""} agregado` : `Triángulo ${datos["CÓDIGO"] || ""} agregado`);
@@ -3753,6 +3881,28 @@ async function guardarDibujo(ev) {
   } catch (e) {
     mal(e.message);
     b.disabled = false; b.textContent = `Guardar ${destino === "triangulo" ? "triángulo" : "padrón"}`;
+  }
+}
+
+// Guarda la forma nueva de un polígono existente, después de que la aceptes
+async function aceptarEdicion(datos, b, mal) {
+  const ed = DIB.editar, destino = DIB.destino, admin = !!S.perfil?.admin;
+  const md = medidasDe(DIB.v);
+  if (!confirm(admin
+    ? `¿Aceptar los cambios de ${ed.nombre}? Queda con ${DIB.v.length} vértices y ${areaTxt(md.area)}. Se cambia para todos (web, QGIS y QField); la forma anterior queda guardada de respaldo.`
+    : `¿Enviar el cambio de ${ed.nombre} para que lo apruebe un administrador?`)) return;
+  const texto = b.textContent;
+  b.disabled = true; b.textContent = "Guardando…";
+  try {
+    const r = await S.api.editarPoligono(destino, ed.id, DIB.v.map((p) => [p.lon, p.lat]), datos);
+    aviso(r === "PEDIDO" ? "Cambio enviado: queda pendiente hasta que lo apruebe un administrador" : `${ed.nombre}: cambios guardados`);
+    terminarDibujo();
+    await cargar();
+    await cargarSolicitudes();
+    abrirAgri(destino === "padron" ? "padr" : "tri", ed.id);
+  } catch (e) {
+    mal(e.message);
+    b.disabled = false; b.textContent = texto;
   }
 }
 

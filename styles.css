@@ -490,3 +490,6 @@ body.con-tabla .mapa-zona { display: none; }
 .vertice.en-mojon span { background: #ff2e2e; color: #fff; border-color: #fff; }
 .vertice.en-vertice span { background: #c3f4ca; color: #1e1e1e; border-color: #fff; }
 .vertice.primero span { outline: 2px solid #6CC4D1; outline-offset: 2px; }
+/* «+» en la mitad de cada lado del polígono que se edita */
+.vertice-medio span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; box-sizing: border-box;
+  background: rgba(30,30,30,.85); color: #6CC4D1; border: 1.5px dashed #6CC4D1; font: 700 13px/1 system-ui, sans-serif; cursor: copy; }

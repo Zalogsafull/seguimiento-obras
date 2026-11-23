@@ -58,6 +58,21 @@ async function crearNeon() {
         neon.from("v_padrones").select("*")]);
       return { amoj: chequear(a, "Amojonamiento"), tri: chequear(t, "Triángulos"), padr: chequear(p, "Padrones") };
     },
+    // Cambiar la forma: el administrador la aplica; un editor deja el cambio pendiente (sql/parte17)
+    async editarPoligono(tipo, id, vertices, datos) {
+      const { data, error } = await neon.rpc("editar_poligono", { p_tipo: tipo, p_id: id, p_vertices: vertices, p_datos: datos });
+      if (error) throw new Error(/editar_poligono|schema cache|could not find/i.test(error.message)
+        ? "Falta preparar la base: corré sql/parte17_editar_poligonos.sql en Neon y tocá Refresh schema cache."
+        : error.message);
+      return data;
+    },
+    async cambiosForma() {
+      const { data, error } = await neon.rpc("cambios_forma_pendientes");
+      return error ? [] : data || []; // sin la parte 17 todavía no hay cambios
+    },
+    async resolverForma(id, aprobar) {
+      chequear(await neon.rpc("resolver_forma", { p_solicitud: id, p_aprobar: aprobar }), "Resolver cambio");
+    },
     async crearPoligono(capa, vertices, datos) {
       const { data, error } = await neon.rpc("crear_poligono", { p_capa: capa, p_vertices: vertices, p_datos: datos });
       if (error) throw new Error(/crear_poligono|schema cache|could not find/i.test(error.message)
@@ -183,6 +198,7 @@ function crearDemo() {
     tri: [{ id: 1, codigo: "DC", area_m2: 1210, geojson: pol([[-34.7893, -55.8508], [-34.7905, -55.8489], [-34.7911, -55.8513]]) }],
     padr: [{ id: 1, padron: "21278", area_m2: 45230, geojson: pol([[-34.7880, -55.8540], [-34.7880, -55.8470], [-34.7925, -55.8470], [-34.7925, -55.8540]]) }],
   };
+  let cambioResuelto = false;
   let hid = 1, cid = 1;
   const hitos = [], cuaderno = [];
   for (const [tipo, lista] of [["estructura", est], ["obra", obr]]) {
@@ -300,6 +316,30 @@ function crearDemo() {
     async obras() { await espera(); return structuredClone(obr); },
     async relevamiento() { await espera(); return structuredClone(relev); },
     async agrimensura() { await espera(); return structuredClone(agri); },
+    // en la demostración el usuario es administrador: el cambio se aplica enseguida
+    async editarPoligono(tipo, id, v, d) {
+      await espera();
+      const x = (tipo === "padron" ? agri.padr : agri.tri).find((y) => y.id === id);
+      if (!x) throw new Error("Ya no existe");
+      x.geojson = JSON.stringify({ type: "Polygon", coordinates: [[...v, v[0]]] });
+      x.area_m2 = null;
+      if (tipo === "padron" && "PADRON" in d) x.padron = d.PADRON || null;
+      if (tipo === "triangulo" && "CÓDIGO" in d) x.codigo = d["CÓDIGO"] || null;
+      return "APLICADO";
+    },
+    // ?demo=1&pendiente=1 muestra un cambio de forma pedido por otra persona
+    async cambiosForma() {
+      await espera();
+      if (!new URLSearchParams(location.search).has("pendiente") || cambioResuelto) return [];
+      return [{ id: 1, tipo: "triangulo", objeto_id: 1, codigo: "DC", pedido_nombre: "Juan Pérez", creado: dia(0), mia: false, datos: { "CÓDIGO": "DC" },
+        vertices: [[-55.8508, -34.7893], [-55.8489, -34.7905], [-55.8500, -34.7915], [-55.8513, -34.7911]] }];
+    },
+    async resolverForma(id, aprobar) {
+      await espera();
+      cambioResuelto = true;
+      if (aprobar) { const t = agri.tri[0]; const v = [[-55.8508, -34.7893], [-55.8489, -34.7905], [-55.8500, -34.7915], [-55.8513, -34.7911]];
+        t.geojson = JSON.stringify({ type: "Polygon", coordinates: [[...v, v[0]]] }); t.area_m2 = null; }
+    },
     async crearPoligono(capa, v, d) {
       await espera();
       const lista = capa === "padron" ? agri.padr : agri.tri;
