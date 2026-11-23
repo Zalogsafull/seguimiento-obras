@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-2";
+import { crearApi } from "./api.js?v=2026-11-23-3";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -971,23 +971,23 @@ function armadoInforme(id) {
     fila: (o) => [o.codigo, o.descripcion, Number(o.lat).toFixed(6), Number(o.lon).toFixed(6), o.z == null || o.z === "" ? "—" : numero(o.z, 2)],
     anchos: { 1: { cellWidth: 110 } } };
   if (id === "obras") return { ...porEtapa,
-    cols: ["Código", "Sala", "Localidad", "Departamento", "Licitación", "Tarea", "D.O.", "Hitos hechos", "Planos"],
-    fila: (o) => [o.codigo, o.sala, o.localidad, o.departamento, o.licitacion, o.tarea, o.director_obra, hitosTxt(o), enlace(o.planos)] };
+    cols: ["Código", "Sala", "Localidad", "Departamento", "Licitación", "Tarea", "D.O.", "Hitos hechos"],
+    fila: (o) => [o.codigo, o.sala, o.localidad, o.departamento, o.licitacion, o.tarea, o.director_obra, hitosTxt(o)] };
   if (id === "recep" || id === "term_e") return { ...(id === "term_e"
       ? { grupo: (x) => CAT[x.cat].nombre, ordenar: (a, b) => ORDEN_CAT.indexOf(a.cat) - ORDEN_CAT.indexOf(b.cat) || diasOrden(a) - diasOrden(b) || porCodigo(a, b) }
       : porVencimiento),
-    cols: ["Código", "Estructura", "Licitación", "D.O.", "Fin de obra", "Vence la recepción", "Situación", "Recepción hecha", "Planos"],
+    cols: ["Código", "Estructura", "Licitación", "D.O.", "Fin de obra", "Vence la recepción", "Situación", "Recepción hecha"],
     fila: (o) => [o.codigo, o.estructura, o.licitacion, o.director_obra, fecha(o.fecha_fin), fecha(o.vence_recepcion), situacionRecepcion(o),
-      conDefinitiva(o) ? "Definitiva" : conProvisoria(o) ? "Provisoria" : "Ninguna", enlace(o.planos)],
+      conDefinitiva(o) ? "Definitiva" : conProvisoria(o) ? "Provisoria" : "Ninguna"],
     anchos: { 7: { fontStyle: "bold" } } };
   if (id === "est_todas") return { ...porEtapa,
-    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin", "Recepción", "Hitos hechos", "Planos"],
-    fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), fecha(o.fecha_fin), o.recepcion, hitosTxt(o), enlace(o.planos)] };
+    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin", "Recepción", "Hitos hechos"],
+    fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), fecha(o.fecha_fin), o.recepcion, hitosTxt(o)] };
   return { ...porEtapa,
-    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin previsto", "Hitos hechos", "Planos", "Observaciones"],
+    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin previsto", "Hitos hechos", "Observaciones"],
     fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio),
-      o.fin_previsto ? fecha(o.fin_previsto) + (atrasada(o) ? " (pasado)" : "") : "", hitosTxt(o), enlace(o.planos), o.observaciones],
-    anchos: { 10: { cellWidth: 62 } } };
+      o.fin_previsto ? fecha(o.fin_previsto) + (atrasada(o) ? " (pasado)" : "") : "", hitosTxt(o), o.observaciones],
+    anchos: { 9: { cellWidth: 62 } } };
 }
 
 // PDF de una capa con las filas dadas (las de la Tabla: capa, filtros y búsqueda)
@@ -1083,8 +1083,8 @@ async function hacerInforme(boton, id, filas, respetar) {
 const COLUMNAS_TABLA = {
   estructura: [["codigo", "Código"], ["etapa_nombre", "Etapa"], ["estado", "Situación", "estado"], ["estructura", "Estructura"],
     ["licitacion", "Licitación"], ["anio", "Año"], ["director_obra", "D.O."], ["fecha_inicio", "Inicio", "fecha"], ["fecha_fin", "Fin", "fecha"],
-    ["recepcion", "Recepción"], ["vence_recepcion", "Vence recepción", "fecha"], ["dias_para_recepcion", "Días a recepción", "num"],
-    ["fin_previsto", "Fin previsto", "fecha"], ["hitos", "Hitos hechos"], ["planos", "Planos"], ["observaciones", "Observaciones"]],
+    ["fin_previsto", "Fin previsto", "fecha"], ["recepcion", "Recepción"], ["vence_recepcion", "Vence recepción", "fecha"],
+    ["dias_para_recepcion", "Días a recepción", "num"], ["hitos", "Hitos hechos"], ["planos", "Planos"], ["observaciones", "Observaciones"]],
   obra: [["codigo", "Código"], ["etapa_nombre", "Etapa"], ["estado", "Situación", "estado"], ["sala", "Sala"], ["localidad", "Localidad"],
     ["departamento", "Departamento"], ["licitacion", "Licitación"], ["tarea", "Tarea"], ["descripcion", "Tipo"], ["director_obra", "D.O."],
     ["fin_previsto", "Fin previsto", "fecha"], ["hitos", "Hitos hechos"], ["planos", "Planos"]],
