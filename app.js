@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-5";
+import { crearApi } from "./api.js?v=2026-11-23-6";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -130,8 +130,8 @@ function aviso(texto, mal = false) {
 // ------------------------------------------------------------ estado
 const S = {
   api: null, usuario: null, perfil: null,
-  datos: { estructura: [], obra: [], relev: [] },
-  capaOn: { ...Object.fromEntries(CAPAS.map((c) => [c.id, c.on])), relev: true },
+  datos: { estructura: [], obra: [], relev: [], amoj: [], tri: [], padr: [] },
+  capaOn: { ...Object.fromEntries(CAPAS.map((c) => [c.id, c.on])), relev: true, amoj: true, tri: true, padr: true },
   catOn: Object.fromEntries(CAPAS.flatMap((c) => c.cats.map((k) => [`${c.id}:${k}`, !(c.apagadas || []).includes(k)]))),
   abiertoArbol: Object.fromEntries(CAPAS.map((c) => [c.id, c.on])),
   f: { mias: false, texto: "", director: "", licitacion: "", estructura: "", anio: "" },
@@ -287,7 +287,7 @@ async function iniciar() {
     // Abre al instante con lo último que se vio y después busca lo nuevo.
     S.usuario = { email: guardado.email };
     S.perfil = guardado.perfil;
-    S.datos = { estructura: [], obra: [], relev: [], ...guardado.datos };
+    S.datos = { estructura: [], obra: [], relev: [], amoj: [], tri: [], padr: [], ...guardado.datos };
     S.relevFalta = guardado.relevFalta;
     S.datosDe = guardado.cuando;
     mostrarApp();
@@ -547,6 +547,13 @@ async function cargar() {
       S.datos.relev = [];
       S.relevFalta = true; // falta correr sql/parte5_relevamiento.sql
     }
+  }
+  try {
+    const a = await conTiempo(S.api.agrimensura(), 20000);
+    Object.assign(S.datos, { amoj: a.amoj || [], tri: a.tri || [], padr: a.padr || [] });
+    S.agriFalta = false;
+  } catch (e) {
+    if (!sinRed(e)) { Object.assign(S.datos, { amoj: [], tri: [], padr: [] }); S.agriFalta = true; } // falta sql/parte15_agrimensura.sql
   }
   S.datosDe = Date.now();
   S.reintentos = 0;
@@ -1605,7 +1612,11 @@ function pintarReferencias() {
     <section class="ajustes-bloque"><h3>Atraso</h3><ul class="leyenda">
       <li><span class="mk-demo">${simbolo("estructura", { estructura: "MONOPOLO" }, "montaje", 0.95)}<i class="atraso"></i></span><span>Punto rojo: pasó la fecha prevista de finalización y no está terminada</span></li></ul></section>
     <section class="ajustes-bloque"><h3>Capas de utilidad</h3><ul class="leyenda">
-      <li>${svgRelev(11)}<span>Relevamiento</span></li><li>${linea}<span>Límites de departamentos</span></li></ul></section>`;
+      <li>${svgRelev(11)}<span>Relevamiento</span></li>
+      <li>${svgMojon(11)}<span>Amojonamiento (mojón)</span></li>
+      <li>${svgTri(false)}<span>Triángulo</span></li><li>${svgTri(true)}<span>Triángulo usable (DC)</span></li>
+      <li>${svgPadron()}<span>Padrón, con su número</span></li>
+      <li>${linea}<span>Límites de departamentos</span></li></ul></section>`;
 }
 
 // ------------------------------------------------------------ capas de utilidad
@@ -1620,6 +1631,7 @@ function pintarUtilidad() {
       </div>
       ${S.relevFalta ? `<p class="nota" style="margin:2px 0 6px 26px">Todavía no se puede leer desde la web: hay que correr sql/parte5_relevamiento.sql en Neon.</p>`
         : `<p class="nota" style="margin:0 0 6px 26px">Puntos tomados con el GPS, con su Z. Como en QGIS, se ven solo de cerca (1:20.000).${S.capaOn.relev && !relevDeCerca() ? ` <button type="button" class="enlace" id="acercar-relev">Acercar para verlos</button>` : ""}</p>`}
+      ${pintarUtilidadAgri()}
       <div class="nodo-capa">
         <span class="sim">${linea}</span>
         <label><input type="checkbox" name="deptos" ${S.deptosOn ? "checked" : ""}> Límites de departamentos</label>
@@ -1628,9 +1640,12 @@ function pintarUtilidad() {
     </div>`;
   const ac = $("#acercar-relev", u);
   if (ac) ac.onclick = () => S.mapa.setZoom(ZOOM_RELEV);
+  const aa = $("#acercar-agri", u);
+  if (aa) aa.onclick = () => S.mapa.setZoom(ZOOM_AGRI);
   u.onchange = (ev) => {
     const el = ev.target;
     if ("relev" in el.dataset) { S.capaOn.relev = el.checked; pintar(); }
+    if (el.dataset.agri) { S.capaOn[el.dataset.agri] = el.checked; pintar(); pintarUtilidad(); }
     if (el.name === "deptos") { S.deptosOn = el.checked; el.checked ? S.deptos.addTo(S.mapa) : S.deptos.remove(); guardarEstado(); }
   };
 }
@@ -1726,6 +1741,7 @@ function enlazarFilas(cont) {
 function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: false, attributionControl: true, maxZoom: 21 }).setView([-32.6, -56.0], 7);
+  if (new URLSearchParams(location.search).has("demo")) window.__mapa = S.mapa; // para las pruebas de la demostración
   agregarBotonesPaneles();
   L.control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(S.mapa);
   agregarBotonUbicacion();
@@ -1771,7 +1787,7 @@ function prepararMapa() {
   S.mapa.on("zoomend", () => {
     if (relevDeCerca() !== cercaAntes) {
       cercaAntes = relevDeCerca();
-      if (S.capaOn.relev && S.datos.relev.length) pintar(false);
+      if ((S.capaOn.relev && S.datos.relev.length) || S.datos.amoj?.length || S.datos.tri?.length || S.datos.padr?.length || DIB.activo) pintar(false);
       if (UI.modo === "utilidad" && !UI.plegado) pintarUtilidad();
     }
   });
@@ -1809,6 +1825,7 @@ function pintarMapa(v) {
       .on("click", (ev) => (MED.activo ? agregarMedida(ev.target.getLatLng()) : abrirRelev(r.id))).addTo(S.mapa);
     S.marcadores.set(`relev:${r.id}`, m);
   }
+  pintarAgrimensura();
   if (S.primeraVez && puntos.length) {
     S.mapa.fitBounds(puntos, { padding: [30, 30], maxZoom: 11 });
     S.primeraVez = false;
@@ -2558,6 +2575,7 @@ function clickMapaNuevo(ev) {
 }
 
 function cerrarNuevo() {
+  if (DIB.activo) { DIB.activo = false; DIB.grupo?.remove(); DIB.grupo = null; S.mapa.off("click", clickDibujo); }
   $("#nuevo").hidden = true;
   if (PG.marcas) { PG.marcas.remove(); PG.marcas = null; }
   quitarMarca();
@@ -2568,7 +2586,7 @@ function cerrarNuevo() {
 function abrirNuevo() {
   if (MED.activo) terminarMedida();
   $("#ficha").hidden = true; $("#admin").hidden = true;
-  const capasOn = { estructura: CAPAS.some((c) => c.tipo === "estructura" && S.capaOn[c.id]), obra: S.capaOn.obras, relevamiento: S.capaOn.relev };
+  const capasOn = { estructura: CAPAS.some((c) => c.tipo === "estructura" && S.capaOn[c.id]), obra: S.capaOn.obras, relevamiento: S.capaOn.relev, amojonamiento: S.capaOn.amoj };
   if (!capasOn[NV.capa]) NV.capa = capasOn.estructura ? "estructura" : capasOn.obra ? "obra" : "estructura";
   pintarNuevo();
   $("#nuevo").hidden = false;
@@ -2585,7 +2603,13 @@ function pintarNuevo() {
   const miDO = S.perfil.iniciales_do || "";
   const est = NV.capa === "estructura";
   const relev = NV.capa === "relevamiento";
-  const campos = relev ? `
+  const amoj = NV.capa === "amojonamiento";
+  const descs = [...new Set(["VERTICE TRIANGULO", ...S.datos.amoj.map((m) => m.descripcion)].filter(Boolean))].sort();
+  const campos = amoj ? `
+      <label>Código<input name="CÓDIGO" list="dl-cod-agri" autocomplete="off" placeholder="El del sitio, ej. TSO"></label>
+      <label>Descripción<input name="DESCRIPCION" list="dl-desc-amoj" autocomplete="off" placeholder="Ej. VERTICE TRIANGULO"></label>
+      ${listaCodigosAgri()}${dl("dl-desc-amoj", descs)}
+      <p class="nota" style="margin:0">Cada mojón es un punto aparte. Las coordenadas X e Y se completan solas.</p>` : relev ? `
       <label>Código<input name="CÓDIGO" autocomplete="off" placeholder="Ej. P1"></label>
       <label>Descripción<textarea name="DESCRIPCIÓN" rows="2" placeholder="Qué es el punto"></textarea></label>
       <label>Z (altura en metros)<input name="Z" inputmode="decimal" autocomplete="off" value="${esc(NV.z)}" placeholder="Se completa con el GPS"></label>
@@ -2626,14 +2650,18 @@ function pintarNuevo() {
   caja.innerHTML = `
     <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Punto nuevo</h2>
       <p class="nota" style="margin:0">Buscá las coordenadas o tocá el mapa. Después podés arrastrar la marca para corregir la ubicación.</p>
-      <button class="boton boton-chico boton-pegar" type="button" id="abrir-pegar">Pegar varios desde QGIS</button></div>
+      <div class="botones-nuevo">
+        <button class="boton boton-chico boton-pegar" type="button" id="abrir-pegar">Pegar desde QGIS o Excel</button>
+        <button class="boton boton-chico boton-pegar" type="button" id="abrir-dibujo">Dibujar triángulo o padrón</button>
+      </div></div>
     <form class="form" id="form-nuevo" novalidate>
       <div class="ficha-bloque">
         <h2>Capa</h2>
-        <div class="segmentado" role="radiogroup">
+        <div class="segmentado cuatro" role="radiogroup">
           <label><input type="radio" name="capa" value="estructura" ${est ? "checked" : ""}> Estructuras OICI Obra</label>
           <label><input type="radio" name="capa" value="obra" ${NV.capa === "obra" ? "checked" : ""}> Obras</label>
           <label><input type="radio" name="capa" value="relevamiento" ${relev ? "checked" : ""}> Relevamiento</label>
+          <label><input type="radio" name="capa" value="amojonamiento" ${amoj ? "checked" : ""}> Amojonamiento</label>
         </div>
       </div>
       <div class="ficha-bloque">
@@ -2672,6 +2700,7 @@ function pintarNuevo() {
   enlazarCerrar(caja, cerrarNuevo);
   const f = $("#form-nuevo");
   $("#cancelar-nuevo").onclick = cerrarNuevo;
+  $("#abrir-dibujo").onclick = () => abrirDibujo("triangulo");
   $("#abrir-pegar").onclick = async () => {
     let lote = null;
     try { lote = leerPegado(await navigator.clipboard.readText()); } catch (e) { /* sin permiso: se pega a mano */ }
@@ -2740,13 +2769,14 @@ async function guardarNuevo(ev) {
   err.hidden = true;
   if (NV.lat == null) return mal("Falta la ubicación: buscá las coordenadas o tocá el mapa.");
   if (!dentroDeUruguay(NV.lat, NV.lon)) return mal("La ubicación queda fuera de Uruguay. Revisá las coordenadas.");
-  const relev = NV.capa === "relevamiento";
+  const relev = NV.capa === "relevamiento", amoj = NV.capa === "amojonamiento";
   const codigo = f["CÓDIGO"].value.trim();
-  if (!codigo && !relev) { f["CÓDIGO"].focus(); return mal("Falta el código."); }
+  if (!codigo && !relev && !amoj) { f["CÓDIGO"].focus(); return mal("Falta el código."); }
   if (relev && f.Z.value.trim() && isNaN(Number(f.Z.value.trim().replace(",", ".")))) { f.Z.focus(); return mal("La Z tiene que ser un número en metros, por ejemplo 34,5."); }
-  const existentes = S.datos[relev ? "relev" : NV.capa];
+  const existentes = amoj ? [] : S.datos[relev ? "relev" : NV.capa]; // varios mojones comparten el código del sitio
   const repetido = codigo && existentes.find((o) => normal(o.codigo) === normal(codigo));
-  const que = { estructura: "una estructura", obra: "una obra", relevamiento: "un punto de relevamiento" }[NV.capa];
+  if (amoj && S.datos.amoj.some((m) => distM(m, NV) < 0.5) && !confirm("Ya hay un mojón en ese mismo lugar. ¿Lo agrego igual?")) return;
+  const que = { estructura: "una estructura", obra: "una obra", relevamiento: "un punto de relevamiento", amojonamiento: "un mojón" }[NV.capa];
   if (repetido && !confirm(`Ya hay ${que} con el código ${repetido.codigo}. ¿Lo agrego igual?`)) return;
   const datos = {};
   f.querySelectorAll(".form [name]").forEach((el) => {
@@ -2767,6 +2797,12 @@ async function guardarNuevo(ev) {
       if (id) abrirRelev(Number(id));
       return;
     }
+    if (tipo === "amojonamiento") {
+      S.capaOn.amoj = true;
+      await cargar();
+      if (id) abrirAgri("amoj", Number(id));
+      return;
+    }
     // que se vea aunque su capa o categoría estuvieran apagadas
     const capa = tipo === "estructura" ? "obra_e" : "obras";
     S.capaOn[capa] = true;
@@ -2776,7 +2812,9 @@ async function guardarNuevo(ev) {
     await cargar();
     if (id) await abrirFicha(tipo, Number(id));
   } catch (e) {
-    mal(NV.capa === "relevamiento" && /crear_punto|function|schema cache|desconocida|Relevamiento/i.test(e.message)
+    mal(NV.capa === "amojonamiento" && /crear_punto|function|schema cache|desconocida/i.test(e.message)
+      ? "Falta preparar la base para el amojonamiento: corré sql/parte15_agrimensura.sql en Neon y tocá Refresh schema cache en la Data API."
+      : NV.capa === "relevamiento" && /crear_punto|function|schema cache|desconocida|Relevamiento/i.test(e.message)
       ? "Falta preparar la base para el relevamiento: corré sql/parte5_relevamiento.sql en Neon y tocá Refresh schema cache en la Data API."
       : /crear_punto|function|schema cache/i.test(e.message)
       ? "Falta preparar la base para agregar puntos: corré sql/parte4_puntos_nuevos.sql en Neon y tocá Refresh schema cache en la Data API."
@@ -2816,14 +2854,21 @@ function utmAGrados(x, y, zona) {
   return { lat: lat * 180 / Math.PI, lon: lon * 180 / Math.PI };
 }
 
-// Geometría WKT -> { x, y, z } del punto, o { tipo } si no es un punto
+// Geometría WKT -> { x, y, z } de un punto, { anillo: [[x, y], …] } de un polígono, o { tipo } si no sirve
 function leerWkt(w) {
   const s = String(w || "").trim();
   if (!s) return { tipo: "sin geometría" };
   // QGIS escribe "PointZ", "MultiPointZ", "Point Z"…: se saca la Z o M del final
   const tipo = (s.match(/^[A-Za-z]+/) || [""])[0].toUpperCase().replace(/(Z|M|ZM)$/, "").replace(/^(MULTI)?(POINT|POLYGON|LINESTRING|CURVE).*/, "$1$2");
+  if (tipo === "POLYGON" || tipo === "MULTIPOLYGON") {
+    // primer anillo del (primer) polígono: lo que hay entre los primeros paréntesis más internos
+    const dentro = s.replace(/^[^(]*\(+/, "").split(")")[0];
+    const anillo = sinCierre(dentro.split(",").map((p) => p.trim().split(/\s+/).map(Number)).filter((p) => p.length >= 2 && p.every(isFinite)));
+    if (anillo.length < 3) return { tipo: "un polígono vacío" };
+    return { anillo, tipo: "un polígono", varios: tipo === "MULTIPOLYGON" && /\)\s*\)\s*,\s*\(/.test(s) };
+  }
   if (tipo !== "POINT" && tipo !== "MULTIPOINT") {
-    const nombres = { POLYGON: "un polígono", MULTIPOLYGON: "un polígono", LINESTRING: "una línea", MULTILINESTRING: "una línea" };
+    const nombres = { LINESTRING: "una línea", MULTILINESTRING: "una línea" };
     return { tipo: nombres[tipo] || "otra geometría" };
   }
   const n = s.match(/-?\d+(?:\.\d+)?(?:e[-+]?\d+)?/gi);
@@ -2833,8 +2878,43 @@ function leerWkt(w) {
   const primero = s.replace(/^[^(]*\(+/, "").split(/[,)]/)[0].trim().split(/\s+/).map(Number);
   return { x: primero[0], y: primero[1], z: tieneZ && primero.length > 2 ? primero[2] : null, varios: tipo === "MULTIPOINT" && /,/.test(s) };
 }
+// el último vértice repetido (el que cierra el anillo) no hace falta
+function sinCierre(pts) {
+  if (pts.length > 1) { const a = pts[0], b = pts[pts.length - 1]; if (a[0] === b[0] && a[1] === b[1]) return pts.slice(0, -1); }
+  return pts;
+}
 
-// Texto del portapapeles -> { titulos, filas: [{ datos, geo }] } o null si no parece copiado de QGIS
+// Lista de coordenadas copiada de Excel (o escrita): una por renglón, en UTM, en grados
+// o en grados, minutos y segundos. Se ignoran los títulos y los números de vértice.
+function leerListaCoordenadas(texto) {
+  const lineas = String(texto || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const pts = [];
+  const num = (c) => {
+    let s = String(c).trim().replace(/\s/g, "");
+    if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, "").replace(",", "."); // 6.139.429,68
+    else if (/^-?\d+,\d+$/.test(s)) s = s.replace(",", ".");                              // 698909,35
+    return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
+  };
+  const esX = (v) => v >= 150000 && v <= 950000, esY = (v) => v >= 5900000 && v <= 6800000;
+  const esLat = (v) => v >= -36 && v <= -29, esLon = (v) => v >= -59.5 && v <= -52;
+  for (const l of lineas) {
+    const celdas = /\t|;/.test(l) ? l.split(/\t|;/) : l.split(/\s+|,\s+/);
+    const ns = celdas.map(num).filter((v) => !isNaN(v));
+    let p = null;
+    for (let i = 0; i + 1 < ns.length && !p; i++) {
+      const [a, b] = [ns[i], ns[i + 1]];
+      if (esX(a) && esY(b)) p = { x: a, y: b };
+      else if (esY(a) && esX(b)) p = { x: b, y: a };          // Norte y después Este
+      else if (esLat(a) && esLon(b)) p = { x: b, y: a, grados: true };
+      else if (esLon(a) && esLat(b)) p = { x: a, y: b, grados: true };
+    }
+    if (!p) { const c = leerCoordenadas(l); if (c && dentroDeUruguay(c.lat, c.lon)) p = { x: c.lon, y: c.lat, grados: true }; }
+    if (p) pts.push(p);
+  }
+  return pts;
+}
+
+// Texto del portapapeles -> { titulos, filas: [{ datos, geo }] } o null si no parece copiado de QGIS ni una lista de coordenadas
 function leerPegado(texto) {
   const t = String(texto || "").replace(/^﻿/, "").trim();
   if (!t) return null;
@@ -2851,37 +2931,42 @@ function leerPegado(texto) {
         let geo;
         if (g.type === "Point" && Array.isArray(g.coordinates)) geo = { x: g.coordinates[0], y: g.coordinates[1], z: g.coordinates[2] ?? null };
         else if (g.type === "MultiPoint" && g.coordinates?.length) geo = { x: g.coordinates[0][0], y: g.coordinates[0][1], z: g.coordinates[0][2] ?? null, varios: g.coordinates.length > 1 };
-        else geo = { tipo: !g.type ? "sin geometría" : /polygon/i.test(g.type) ? "un polígono" : /line/i.test(g.type) ? "una línea" : "otra geometría" };
+        else if (g.type === "Polygon" && g.coordinates?.[0]?.length >= 3) geo = { anillo: sinCierre(g.coordinates[0]), tipo: "un polígono" };
+        else if (g.type === "MultiPolygon" && g.coordinates?.[0]?.[0]?.length >= 3) geo = { anillo: sinCierre(g.coordinates[0][0]), tipo: "un polígono", varios: g.coordinates.length > 1 };
+        else geo = { tipo: !g.type ? "sin geometría" : /line/i.test(g.type) ? "una línea" : "otra geometría" };
         return { datos: f.properties || {}, geo };
       }),
     };
   }
   const lineas = t.split(/\r?\n/).filter((l) => l.trim() !== "");
-  if (lineas.length < 2 || !lineas[0].includes("\t")) {
-    // una sola columna de WKT (QGIS sin atributos) también sirve
-    if (lineas.length >= 2 && /^wkt_geom$/i.test(lineas[0].trim())) {
-      return { origen: "QGIS", titulos: [], filas: lineas.slice(1).map((l) => ({ datos: {}, geo: leerWkt(l) })) };
+  const cab = (lineas[0] || "").split("\t").map((x) => x.trim());
+  const iGeo = cab.findIndex((x) => /^wkt_geom$/i.test(x));
+  if (iGeo >= 0 && lineas.length >= 2) {
+    const filas = [];
+    for (const l of lineas.slice(1)) {
+      const celdas = l.split("\t");
+      // un valor con salto de línea parte la fila: se ignora el pedazo
+      if (celdas.length < cab.length && filas.length && celdas.length === 1 && !/^[A-Za-z]+\s*Z?\s*\(/.test(l.trim())) continue;
+      const datos = {};
+      cab.forEach((tt, i) => { if (i !== iGeo) datos[tt] = celdas[i]; });
+      filas.push({ datos, geo: leerWkt(celdas[iGeo]) });
     }
-    return null;
+    if (filas.length) return { origen: "QGIS", titulos: cab.filter((_, i) => i !== iGeo), filas };
   }
-  const titulos = lineas[0].split("\t").map((x) => x.trim());
-  const iGeo = titulos.findIndex((x) => /^wkt_geom$/i.test(x));
-  const filas = [];
-  for (const l of lineas.slice(1)) {
-    const celdas = l.split("\t");
-    // un valor con salto de línea parte la fila: se pega a la anterior
-    if (celdas.length < titulos.length && filas.length && celdas.length === 1) continue;
-    const datos = {};
-    titulos.forEach((tt, i) => { if (i !== iGeo) datos[tt] = celdas[i]; });
-    filas.push({ datos, geo: iGeo >= 0 ? leerWkt(celdas[iGeo]) : { tipo: "sin geometría" } });
+  // Lista de coordenadas (por ejemplo, los vértices de un padrón copiados de Excel)
+  const pts = leerListaCoordenadas(t);
+  if (pts.length) {
+    const nro = t.match(/padr[oó]n\D{0,6}(\d{1,7})/i);
+    return { origen: "lista", titulos: [], padron: nro ? nro[1] : "", grados: pts.every((p) => p.grados),
+      filas: pts.map((p) => ({ datos: {}, geo: { x: p.x, y: p.y } })) };
   }
-  if (!filas.length) return null;
-  return { origen: "QGIS", titulos: titulos.filter((_, i) => i !== iGeo), sinGeometria: iGeo < 0, filas };
+  if (lineas.length >= 2 && cab.length > 1) return { origen: "QGIS", titulos: cab, sinGeometria: true, filas: lineas.slice(1).map(() => ({ datos: {}, geo: { tipo: "sin geometría" } })) };
+  return null;
 }
 
 // Qué sistema de coordenadas usan los puntos pegados
 function sistemaDe(lote) {
-  const pts = lote.filas.map((f) => f.geo).filter((g) => g.x != null);
+  const pts = lote.filas.flatMap((f) => (f.geo.anillo ? f.geo.anillo.map(([x, y]) => ({ x, y })) : f.geo.x != null ? [f.geo] : []));
   if (!pts.length) return "utm21";
   if (pts.every((g) => Math.abs(g.x) <= 180 && Math.abs(g.y) <= 90)) return "grados";
   const enUy = (z) => pts.filter((g) => { const p = utmAGrados(g.x, g.y, z); return dentroDeUruguay(p.lat, p.lon); }).length;
@@ -2893,9 +2978,17 @@ function aGrados(g, sistema) {
   return utmAGrados(g.x, g.y, sistema === "utm22" ? 22 : 21);
 }
 
+// Capas de destino: las de puntos y las de polígonos
+const NOMBRE_DESTINO = { estructura: "Estructuras OICI Obra", obra: "Obras", relevamiento: "Relevamiento",
+  amojonamiento: "Amojonamiento", triangulo: "Triángulos", padron: "Padrones" };
+const DESTINO_POLIGONO = new Set(["triangulo", "padron"]);
+
 // Columnas de la capa de destino que la web conoce, para emparejar títulos sin importar mayúsculas ni tildes
 function columnasDestino(capa) {
   if (capa === "relevamiento") return ["CÓDIGO", "DESCRIPCIÓN", "Z"];
+  if (capa === "amojonamiento") return ["CÓDIGO", "DESCRIPCION"];
+  if (capa === "triangulo") return ["CÓDIGO"];
+  if (capa === "padron") return ["PADRON"];
   return ["CÓDIGO", capa === "estructura" ? "ESTADO" : "Estado", ...CAMPOS_EDITABLES[capa].map((c) => c[0])];
 }
 function emparejar(titulos, capa) {
@@ -2903,7 +2996,8 @@ function emparejar(titulos, capa) {
   // en Obras "Descripción" es el tipo (OBRA / COSITIO); en Relevamiento es el texto del punto
   return titulos.map((t) => {
     const k = clave(t);
-    if (NO_SE_COPIAN.has(k)) return { titulo: t, col: null, motivo: "la calcula la base" };
+    if (NO_SE_COPIAN.has(k) || ((capa === "amojonamiento") && (k === "X" || k === "Y")))
+      return { titulo: t, col: null, motivo: "la calcula la base" };
     return { titulo: t, col: conocidas.get(k) || t, conocida: conocidas.has(k) };
   });
 }
@@ -2919,14 +3013,16 @@ function valorPegado(v, col) {
   if (col === "Z") s = s.replace(",", ".");
   return s;
 }
+const nombreDe = (capa, d) => (capa === "padron" ? (d.PADRON ? "Padrón " + d.PADRON : "Padrón sin número") : d["CÓDIGO"] || "");
+// distancia aproximada en metros entre dos puntos cercanos
+const distM = (a, b) => Math.hypot((a.lat - b.lat) * 110900, (a.lon - b.lon) * 111320 * Math.cos(a.lat * Math.PI / 180));
 
 // Lo que se va a pegar, con el motivo de cada uno que se saltea
 function prepararPegado() {
   const { lote, capa, sistema } = PG;
+  const poligono = DESTINO_POLIGONO.has(capa);
   const cols = emparejar(lote.titulos, capa);
-  const existentes = new Set(S.datos[capa === "relevamiento" ? "relev" : capa].map((o) => normal(o.codigo)).filter(Boolean));
-  const vistos = new Set();
-  return lote.filas.map((f) => {
+  const leerDatos = (f) => {
     const datos = {};
     for (const c of cols) {
       if (!c.col) continue;
@@ -2936,172 +3032,282 @@ function prepararPegado() {
     if (capa === "relevamiento" && datos.Z == null && f.geo.z != null && f.geo.z !== 0) datos.Z = String(f.geo.z);
     if (capa === "estructura" && datos.ESTADO && !["PROY", "CONS", "FIN"].includes(datos.ESTADO)) delete datos.ESTADO;
     if (capa === "obra" && datos.Estado && !["PROY", "CONS", "FIN"].includes(datos.Estado)) delete datos.Estado;
-    const codigo = datos["CÓDIGO"] || "";
-    const p = aGrados(f.geo, sistema);
+    return datos;
+  };
+  // ya cargados en la capa: por código (por número de padrón en Padrones; por lugar en Amojonamiento)
+  const lista = capa === "relevamiento" ? S.datos.relev : capa === "amojonamiento" ? S.datos.amoj
+    : capa === "triangulo" ? S.datos.tri : capa === "padron" ? S.datos.padr : S.datos[capa];
+  const existentes = new Set((lista || []).map((o) => normal(capa === "padron" ? o.padron : o.codigo)).filter(Boolean));
+  const vistos = new Set();
+  const repetido = (nombre, p) => {
+    if (capa === "amojonamiento") return p && S.datos.amoj.some((m) => distM(m, p) < 0.5) ? "ya hay un mojón en ese lugar" : null;
+    if (!nombre || capa === "relevamiento") return null;
+    if (vistos.has(nombre)) return "repetido en lo copiado";
+    if (existentes.has(nombre) && PG.saltearRepetidos) return "ya existe en la capa";
+    return null;
+  };
+
+  // Polígono a partir de puntos: se unen todos, en el orden en que se copiaron
+  const soloPuntos = lote.filas.every((f) => !f.geo.anillo);
+  if (poligono && soloPuntos) {
+    const verts = lote.filas.map((f) => aGrados(f.geo, sistema)).filter(Boolean);
+    const datos = lote.filas.length ? leerDatos(lote.filas[0]) : {};
+    for (const [k, v] of Object.entries(PG.datosUnir || {})) if (v) datos[k] = v; else delete datos[k];
     let salta = null;
-    if (!p) salta = f.geo.tipo === "sin geometría" ? "no tiene ubicación" : `es ${f.geo.tipo}; en la web solo hay capas de puntos`;
-    else if (!dentroDeUruguay(p.lat, p.lon)) salta = "queda fuera de Uruguay";
-    else if (!codigo && capa !== "relevamiento") salta = "no tiene código";
-    else if (codigo && vistos.has(normal(codigo)) && capa !== "relevamiento") salta = "código repetido en lo copiado";
-    else if (codigo && existentes.has(normal(codigo)) && PG.saltearRepetidos) salta = "ya existe en la capa";
-    if (codigo) vistos.add(normal(codigo));
-    return { datos, codigo, p, salta, varios: f.geo.varios };
+    if (verts.length < 3) salta = "hacen falta al menos 3 puntos para un polígono";
+    else if (verts.some((p) => !dentroDeUruguay(p.lat, p.lon))) salta = "hay vértices fuera de Uruguay";
+    else salta = repetido(normal(capa === "padron" ? datos.PADRON : datos["CÓDIGO"]), null);
+    const clvU = normal(capa === "padron" ? datos.PADRON : datos["CÓDIGO"]);
+    return [{ datos, codigo: nombreDe(capa, datos), verts, salta, unidos: true, yaEstaba: !!clvU && existentes.has(clvU) }];
+  }
+
+  return lote.filas.map((f) => {
+    const datos = leerDatos(f);
+    const codigo = poligono ? nombreDe(capa, datos) : datos["CÓDIGO"] || "";
+    const clv = normal(capa === "padron" ? datos.PADRON : datos["CÓDIGO"]);
+    let salta = null, p = null, verts = null;
+    if (poligono) {
+      verts = f.geo.anillo ? f.geo.anillo.map(([x, y]) => aGrados({ x, y }, sistema)) : null;
+      if (!verts) salta = f.geo.tipo === "sin geometría" ? "no tiene ubicación" : `es ${f.geo.tipo || "un punto"}; esta capa es de polígonos`;
+      else if (verts.some((v) => !v || !dentroDeUruguay(v.lat, v.lon))) salta = "queda fuera de Uruguay";
+      else salta = repetido(clv, null);
+    } else {
+      p = f.geo.anillo ? null : aGrados(f.geo, sistema);
+      if (!p) salta = f.geo.tipo === "sin geometría" ? "no tiene ubicación" : `es ${f.geo.tipo}; esta capa es de puntos`;
+      else if (!dentroDeUruguay(p.lat, p.lon)) salta = "queda fuera de Uruguay";
+      else if (!codigo && (capa === "estructura" || capa === "obra")) salta = "no tiene código";
+      else salta = repetido(clv, p);
+    }
+    if (clv) vistos.add(clv);
+    const yaEstaba = !!clv && capa !== "relevamiento" && capa !== "amojonamiento" && existentes.has(clv);
+    return { datos, codigo, p, verts, salta, varios: f.geo.varios, yaEstaba };
   });
 }
 
 function abrirPegar(lote) {
   if (!editor()) return aviso("Solo un usuario con permiso de editor puede pegar elementos.", true);
   if (MED.activo) terminarMedida();
+  if (DIB.activo) terminarDibujo();
   if (!$("#nuevo").hidden) cerrarNuevo();
   $("#ficha").hidden = true; $("#admin").hidden = true;
   PG.lote = lote;
   PG.corriendo = false;
   if (lote) {
     PG.sistema = sistemaDe(lote);
-    PG.capa = capaSugerida(lote.titulos);
+    PG.capa = capaSugerida(lote);
+    PG.datosUnir = lote.origen === "lista" && lote.padron ? { PADRON: lote.padron } : null;
     PG.vistoUnaVez = false;
   }
   $("#nuevo").hidden = false; // antes de dibujar, para encuadrar el mapa sabiendo cuánto tapa el panel
   pintarPegar();
 }
 
-// La capa de destino: la que se parece a las columnas copiadas
-function capaSugerida(titulos) {
-  const k = new Set(titulos.map(clave));
+// La capa de destino: la que se parece a las columnas y a la geometría copiadas
+function capaSugerida(lote) {
+  const k = new Set(lote.titulos.map(clave));
+  // si la mayoría de lo copiado son polígonos, va a una capa de polígonos
+  const nPol = lote.filas.filter((f) => f.geo.anillo).length, nPt = lote.filas.filter((f) => f.geo.x != null).length;
+  if (nPol > nPt) return k.has("PADRON") ? "padron" : "triangulo";
+  if (lote.origen === "lista") return lote.filas.length >= 3 ? "padron" : "amojonamiento";
   const puntaje = (capa) => columnasDestino(capa).filter((c) => k.has(clave(c))).length
     + (capa === "estructura" && k.has("ESTRUCTURA") ? 3 : 0) + (capa === "obra" && (k.has("SALA") || k.has("LOCALIDAD")) ? 3 : 0)
-    + (capa === "relevamiento" && k.size <= 4 ? 1 : 0);
-  const orden = ["estructura", "obra", "relevamiento"].map((c) => [c, puntaje(c)]).sort((a, b) => b[1] - a[1]);
+    + (capa === "relevamiento" && k.has("Z") ? 2 : 0) + (capa === "amojonamiento" && k.has("X") && k.has("Y") ? 3 : 0);
+  const orden = ["estructura", "obra", "relevamiento", "amojonamiento"].map((c) => [c, puntaje(c)]).sort((a, b) => b[1] - a[1]);
   return orden[0][1] > 0 ? orden[0][0] : NV.capa;
 }
 
 function cerrarPegar() {
   if (PG.corriendo) { PG.cancelar = true; return; }
-  if (PG.marcas) { PG.marcas.remove(); PG.marcas = null; }
+  quitarMarcasPegar();
   PG.lote = null;
   $("#nuevo").hidden = true;
 }
 
-const NOMBRE_DESTINO = { estructura: "Estructuras OICI Obra", obra: "Obras", relevamiento: "Relevamiento" };
-
 function pintarPegar() {
   const caja = $("#nuevo");
   const cabeza = `<div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Pegar elementos</h2>
-      <p class="nota" style="margin:0">Copiá en QGIS las entidades seleccionadas (Ctrl+C) y pegalas acá (Ctrl+V), como al pegar en una capa en edición.</p></div>`;
+      <p class="nota" style="margin:0">Copiá en QGIS lo seleccionado (Ctrl+C), o una lista de coordenadas de Excel, y pegalo acá (Ctrl+V).</p></div>`;
   if (!PG.lote) {
     caja.innerHTML = `${cabeza}
       <div class="ficha-bloque">
         <h2>Pegá lo copiado</h2>
         <textarea id="pegar-texto" class="pegar-texto" rows="6" placeholder="Pegá acá (Ctrl+V o mantené apretado y Pegar)"></textarea>
         <p class="error" id="pegar-error" hidden></p>
-        <p class="nota pista">En QGIS: seleccioná los puntos, Editar > Copiar objetos espaciales (Ctrl+C). Si lo pegado no trae coordenadas, en QGIS andá a Configuración > Opciones > Fuentes de datos y en «Copiar objetos como» elegí «Texto sin formato, geometría WKT» o «GeoJSON».</p>
+        <p class="nota pista">Desde QGIS: seleccioná los puntos o polígonos y Editar > Copiar objetos espaciales (Ctrl+C). Desde Excel: copiá las columnas de coordenadas (X e Y en UTM, o latitud y longitud), un vértice por renglón.</p>
+        <p class="nota pista">Si lo pegado de QGIS no trae coordenadas, en QGIS andá a Configuración > Opciones > Fuentes de datos y en «Copiar objetos como» elegí «Texto sin formato, geometría WKT» o «GeoJSON».</p>
       </div>`;
     enlazarCerrar(caja, cerrarPegar);
     const ta = $("#pegar-texto");
     const probar = () => {
       const lote = leerPegado(ta.value);
-      if (lote) return abrirPegar(lote);
+      if (lote && !lote.sinGeometria) return abrirPegar(lote);
       $("#pegar-error").hidden = !ta.value.trim();
-      $("#pegar-error").textContent = "Eso no parece copiado de QGIS: tiene que tener una fila de títulos y la geometría (wkt_geom), o ser GeoJSON.";
+      $("#pegar-error").textContent = lote?.sinGeometria
+        ? "Lo copiado no trae la geometría (falta la columna wkt_geom). Mirá la nota de abajo para que QGIS la copie."
+        : "No encontré coordenadas ni elementos de QGIS en lo pegado.";
     };
     ta.oninput = probar;
     ta.focus();
     return;
   }
   quitarMarcasPegar();
+  const poligono = DESTINO_POLIGONO.has(PG.capa);
   const items = prepararPegado();
   const van = items.filter((x) => !x.salta);
+  const unidos = items.length === 1 && items[0].unidos;
   const motivos = {};
   for (const x of items) if (x.salta) motivos[x.salta] = (motivos[x.salta] || 0) + 1;
-  const repetidosEnCapa = items.filter((x) => x.salta === "ya existe en la capa" || (!PG.saltearRepetidos && x.codigo
-    && S.datos[PG.capa === "relevamiento" ? "relev" : PG.capa].some((o) => normal(o.codigo) === normal(x.codigo)))).length;
+  const repetidosEnCapa = items.filter((x) => x.yaEstaba).length;
   const cols = emparejar(PG.lote.titulos, PG.capa);
   const copian = cols.filter((c) => c.col && c.conocida).map((c) => c.col);
   const otras = cols.filter((c) => c.col && !c.conocida).map((c) => c.col);
   const calculadas = cols.filter((c) => !c.col).map((c) => c.titulo);
-  const lista = van.slice(0, 40).map((x) => `<li><b>${esc(x.codigo || "(sin código)")}</b> <span class="nota">${esc(
-    PG.capa === "estructura" ? [x.datos.ESTRUCTURA, x.datos.ESTADO].filter(Boolean).join(" · ")
-      : PG.capa === "obra" ? [x.datos.Localidad, x.datos.Estado].filter(Boolean).join(" · ")
-      : [x.datos["DESCRIPCIÓN"], x.datos.Z != null ? `Z ${x.datos.Z}` : ""].filter(Boolean).join(" · "))}</span></li>`).join("");
+  const n = PG.lote.filas.length;
+  const hayPoligonos = PG.lote.filas.some((f) => f.geo.anillo);
+  const soloPoligonos = hayPoligonos && !PG.lote.filas.some((f) => f.geo.x != null);
+  const desc = (x) => poligono ? `${x.verts?.length || 0} vértices` : PG.capa === "estructura" ? [x.datos.ESTRUCTURA, x.datos.ESTADO].filter(Boolean).join(" · ")
+    : PG.capa === "obra" ? [x.datos.Localidad, x.datos.Estado].filter(Boolean).join(" · ")
+    : PG.capa === "amojonamiento" ? x.datos.DESCRIPCION || ""
+    : [x.datos["DESCRIPCIÓN"], x.datos.Z != null ? `Z ${x.datos.Z}` : ""].filter(Boolean).join(" · ");
+  const lista = van.slice(0, 40).map((x) => `<li><b>${esc(x.codigo || "(sin código)")}</b> <span class="nota">${esc(desc(x))}</span></li>`).join("");
+  const origen = PG.lote.origen === "GeoJSON" ? " (GeoJSON)" : PG.lote.origen === "lista" ? "" : " de QGIS";
+  const titulo = PG.lote.origen === "lista" ? `${n} ${n === 1 ? "coordenada pegada" : "coordenadas pegadas"}`
+    : `${n} ${n === 1 ? "elemento copiado" : "elementos copiados"}${origen}`;
+  const opcion = (k) => `<option value="${k}" ${PG.capa === k ? "selected" : ""}>${NOMBRE_DESTINO[k]}</option>`;
+  const datoUnido = unidos ? items[0].datos : {};
   caja.innerHTML = `${cabeza}
     <form class="form" id="form-pegar" novalidate>
       <div class="ficha-bloque">
-        <h2>${PG.lote.filas.length} ${PG.lote.filas.length === 1 ? "elemento copiado" : "elementos copiados"}${PG.lote.origen === "GeoJSON" ? " (GeoJSON)" : " de QGIS"}</h2>
-        <p class="nota" style="margin:0 0 8px">Pegar en la capa:</p>
-        <div class="segmentado" role="radiogroup">
-          ${Object.entries(NOMBRE_DESTINO).map(([k, n]) => `<label><input type="radio" name="destino" value="${k}" ${PG.capa === k ? "checked" : ""}> ${n}</label>`).join("")}
-        </div>
+        <h2>${titulo}</h2>
+        <label>Pegar en la capa
+          <select name="destino">
+            ${soloPoligonos ? "" : `<optgroup label="Puntos (cada uno por separado)">${["estructura", "obra", "relevamiento", "amojonamiento"].map(opcion).join("")}</optgroup>`}
+            <optgroup label="${hayPoligonos ? "Polígonos" : "Polígono (se unen todos los puntos)"}">${["triangulo", "padron"].map(opcion).join("")}</optgroup>
+          </select></label>
         <label style="margin-top:10px">Coordenadas de lo copiado
-          <select name="sistema">${Object.entries(SISTEMAS).map(([k, n]) => `<option value="${k}" ${PG.sistema === k ? "selected" : ""}>${n}</option>`).join("")}</select>
+          <select name="sistema">${Object.entries(SISTEMAS).map(([k, nn]) => `<option value="${k}" ${PG.sistema === k ? "selected" : ""}>${nn}</option>`).join("")}</select>
         </label>
-        <p class="nota pista">Se detectó solo. Los puntos que se van a pegar se ven en el mapa: si aparecen corridos, cambiá el sistema.</p>
+        <p class="nota pista">Se detectó solo. Lo que se va a pegar se ve en el mapa: si aparece corrido, cambiá el sistema.</p>
       </div>
-      <div class="ficha-bloque">
+      ${unidos ? `<div class="ficha-bloque">
+        <h2>Datos del ${PG.capa === "padron" ? "padrón" : "triángulo"}</h2>
+        <p class="nota" style="margin:0 0 8px">Los ${n} puntos se unen en un solo polígono, en el orden en que los copiaste. Se cierra solo.</p>
+        ${PG.capa === "padron"
+          ? `<label>Número de padrón<input name="unir_padron" inputmode="numeric" autocomplete="off" value="${esc(datoUnido.PADRON || "")}"></label>`
+          : `<label>Código<input name="unir_codigo" list="dl-cod-agri" autocomplete="off" value="${esc(datoUnido["CÓDIGO"] || "")}" placeholder="Ej. el código del sitio, o DC si es usable"></label>${listaCodigosAgri()}`}
+        <button class="boton boton-chico" type="button" id="pegar-a-dibujo" ${items[0].verts.length ? "" : "disabled"}>Ajustar los vértices en el mapa antes de guardar</button>
+      </div>` : PG.lote.origen === "lista" ? "" : `<div class="ficha-bloque">
         <h2>Columnas</h2>
         <p class="nota" style="margin:0">${copian.length ? `Se copian: ${copian.map(esc).join(", ")}.` : "Ninguna columna coincide con las de la capa."}</p>
         ${otras.length ? `<p class="nota" style="margin:6px 0 0">También se intentan: ${otras.map(esc).join(", ")} (se guardan si la capa tiene esa columna; si no, se ignoran).</p>` : ""}
-        ${calculadas.length ? `<p class="nota" style="margin:6px 0 0">No se copian, las pone la base: ${calculadas.map(esc).join(", ")}. La etapa empieza en Proyecto; los hitos se marcan después en la ficha.</p>` : ""}
-      </div>
+        ${calculadas.length ? `<p class="nota" style="margin:6px 0 0">No se copian, las pone la base: ${calculadas.map(esc).join(", ")}.${PG.capa === "estructura" || PG.capa === "obra" ? " La etapa empieza en Proyecto; los hitos se marcan después en la ficha." : ""}</p>` : ""}
+      </div>`}
       <div class="ficha-bloque">
-        <h2>Se van a pegar ${van.length}</h2>
-        ${repetidosEnCapa ? `<label class="check"><input type="checkbox" name="saltear" ${PG.saltearRepetidos ? "checked" : ""}> No pegar los ${repetidosEnCapa} que ya existen en la capa (mismo código)</label>` : ""}
-        ${Object.keys(motivos).length ? `<ul class="pegar-saltea">${Object.entries(motivos).map(([m, n]) => `<li>${n} ${n === 1 ? "se saltea" : "se saltean"}: ${esc(m)}</li>`).join("")}</ul>` : ""}
-        ${items.some((x) => x.varios) ? `<p class="nota">Hay multipuntos con más de un punto: se usa el primero.</p>` : ""}
-        <ul class="pegar-lista">${lista}${van.length > 40 ? `<li class="nota">y ${van.length - 40} más…</li>` : ""}</ul>
+        <h2>Se ${van.length === 1 ? "va" : "van"} a pegar ${van.length}</h2>
+        ${repetidosEnCapa ? `<label class="check"><input type="checkbox" name="saltear" ${PG.saltearRepetidos ? "checked" : ""}> No pegar los ${repetidosEnCapa} que ya existen en la capa (mismo ${PG.capa === "padron" ? "número" : "código"})</label>` : ""}
+        ${Object.keys(motivos).length ? `<ul class="pegar-saltea">${Object.entries(motivos).map(([m, nn]) => `<li>${nn} ${nn === 1 ? "se saltea" : "se saltean"}: ${esc(m)}</li>`).join("")}</ul>` : ""}
+        ${items.some((x) => x.varios) ? `<p class="nota">Hay ${poligono ? "multipolígonos" : "multipuntos"} con más de una parte: se usa la primera.</p>` : ""}
+        ${unidos ? "" : `<ul class="pegar-lista">${lista}${van.length > 40 ? `<li class="nota">y ${van.length - 40} más…</li>` : ""}</ul>`}
       </div>
       <div class="ficha-bloque acciones-nuevo">
         <p class="nota" id="pegar-progreso" hidden></p>
         <p class="error" id="pegar-error" hidden></p>
-        <button class="boton boton-primario" type="submit" ${van.length ? "" : "disabled"}>Pegar ${van.length} en ${NOMBRE_DESTINO[PG.capa]}</button>
+        <button class="boton boton-primario" type="submit" ${van.length ? "" : "disabled"}>Pegar ${van.length === 1 && unidos ? "el polígono" : van.length} en ${NOMBRE_DESTINO[PG.capa]}</button>
         <button class="boton" type="button" id="cancelar-pegar">Cancelar</button>
       </div>
     </form>`;
   enlazarCerrar(caja, cerrarPegar);
   const f = $("#form-pegar");
   $("#cancelar-pegar").onclick = cerrarPegar;
-  f.querySelectorAll("input[name=destino]").forEach((r) => (r.onchange = () => { PG.capa = r.value; pintarPegar(); }));
+  f.destino.onchange = () => { PG.capa = f.destino.value; pintarPegar(); };
   f.sistema.onchange = () => { PG.sistema = f.sistema.value; PG.vistoUnaVez = false; pintarPegar(); };
   if (f.saltear) f.saltear.onchange = () => { PG.saltearRepetidos = f.saltear.checked; pintarPegar(); };
-  f.onsubmit = (ev) => { ev.preventDefault(); pegarTodo(van); };
+  // datos del polígono armado con puntos sueltos
+  const datoCampo = f.unir_padron || f.unir_codigo;
+  if (datoCampo) datoCampo.onchange = () => {
+    PG.datosUnir = { ...(PG.datosUnir || {}), [f.unir_padron ? "PADRON" : "CÓDIGO"]: datoCampo.value.trim() };
+    pintarPegar();
+  };
+  const aDib = $("#pegar-a-dibujo");
+  if (aDib) aDib.onclick = () => {
+    const x = items[0], capa = PG.capa, datos = { ...x.datos };
+    if (datoCampo) datos[f.unir_padron ? "PADRON" : "CÓDIGO"] = datoCampo.value.trim();
+    quitarMarcasPegar(); PG.lote = null;
+    abrirDibujo(capa, x.verts, datos);
+  };
+  f.onsubmit = (ev) => {
+    ev.preventDefault();
+    if (datoCampo) { const k = f.unir_padron ? "PADRON" : "CÓDIGO"; van.forEach((x) => { if (datoCampo.value.trim()) x.datos[k] = datoCampo.value.trim(); else delete x.datos[k]; }); }
+    pegarTodo(van);
+  };
   ponerMarcasPegar(items);
 }
 
 function quitarMarcasPegar() { if (PG.marcas) { PG.marcas.remove(); PG.marcas = null; } }
 function ponerMarcasPegar(items) {
   quitarMarcasPegar();
-  PG.marcas = L.featureGroup(items.filter((x) => x.p).map((x) => L.circleMarker([x.p.lat, x.p.lon], {
-    radius: 7, weight: 2, color: x.salta ? "#8a8a8a" : "#ffffff", fillColor: x.salta ? "#bdbdbd" : "#6CC4D1", fillOpacity: 0.95,
-  }).bindTooltip(`${esc(x.codigo || "(sin código)")}${x.salta ? " · " + esc(x.salta) : ""}`)))
-    .addTo(S.mapa);
+  const capas = [];
+  for (const x of items) {
+    const tip = `${esc(x.codigo || "(sin código)")}${x.salta ? " · " + esc(x.salta) : ""}`;
+    if (x.verts?.length) {
+      const ll = x.verts.filter(Boolean).map((v) => [v.lat, v.lon]);
+      capas.push(L.polygon(ll, { color: x.salta ? "#8a8a8a" : "#6CC4D1", weight: 2.5, dashArray: "6 4", fillColor: "#6CC4D1", fillOpacity: x.salta ? 0.05 : 0.15 }).bindTooltip(tip));
+      for (const p of ll) capas.push(L.circleMarker(p, { radius: 4, weight: 1.5, color: "#ffffff", fillColor: "#6CC4D1", fillOpacity: 1, interactive: false }));
+    } else if (x.p) {
+      capas.push(L.circleMarker([x.p.lat, x.p.lon], { radius: 7, weight: 2, color: x.salta ? "#8a8a8a" : "#ffffff",
+        fillColor: x.salta ? "#bdbdbd" : "#6CC4D1", fillOpacity: 0.95 }).bindTooltip(tip));
+    }
+  }
+  PG.marcas = L.featureGroup(capas).addTo(S.mapa);
   if (!PG.vistoUnaVez) { PG.vistoUnaVez = true; verMarcasPegar(); }
 }
+// todos los puntos de una capa de Leaflet (marcador o polígono)
+const puntosDe = (c) => (c.getLatLng ? [c.getLatLng()] : c.getLatLngs ? c.getLatLngs().flat(3) : []);
 function verMarcasPegar() {
   // solo los que quedan en Uruguay (uno con coordenadas mal no tiene que llevar el mapa al otro lado del mundo)
-  const pts = (PG.marcas?.getLayers() || []).map((m) => m.getLatLng()).filter((l) => dentroDeUruguay(l.lat, l.lng));
+  const pts = (PG.marcas?.getLayers() || []).flatMap(puntosDe).filter((l) => dentroDeUruguay(l.lat, l.lng));
   if (!pts.length) return;
-  const b = L.latLngBounds(pts);
-  // en el celular el panel tapa la parte de abajo del mapa
+  encuadrar(L.latLngBounds(pts));
+}
+// encuadrar el mapa dejando libre la parte que tapa el panel en el celular
+function encuadrar(b, maxZoom = 16) {
   const tapa = movil.matches ? Math.min($("#nuevo").offsetHeight, S.mapa.getSize().y * 0.55) : 0;
   S.mapa.invalidateSize();
-  S.mapa.fitBounds(b, { maxZoom: 16, paddingTopLeft: [60, 60], paddingBottomRight: [60, tapa + 30] });
+  S.mapa.fitBounds(b, { maxZoom, paddingTopLeft: [60, 60], paddingBottomRight: [60, tapa + 30] });
+}
+
+// Al terminar de agregar: que se vea la capa aunque estuviera apagada
+function prenderCapaDestino(capa) {
+  if (capa === "relevamiento") S.capaOn.relev = true;
+  else if (capa === "amojonamiento") S.capaOn.amoj = true;
+  else if (capa === "triangulo") S.capaOn.tri = true;
+  else if (capa === "padron") S.capaOn.padr = true;
+  else {
+    const id = capa === "estructura" ? "obra_e" : "obras";
+    S.capaOn[id] = true;
+    CAPAS.filter((c) => c.tipo === capa).forEach((c) => (S.capaOn[c.id] = true));
+  }
 }
 
 async function pegarTodo(van) {
   const f = $("#form-pegar"), b = f.querySelector("button[type=submit]"), prog = $("#pegar-progreso"), err = $("#pegar-error");
   PG.corriendo = true; PG.cancelar = false;
   b.disabled = true;
-  f.querySelectorAll("input, select").forEach((x) => (x.disabled = true));
+  f.querySelectorAll("input, select, button:not(#cancelar-pegar)").forEach((x) => (x.disabled = true));
   $("#cancelar-pegar").textContent = "Detener";
   prog.hidden = false;
   const capa = PG.capa, fallas = [];
   let ok = 0;
   for (const [i, x] of van.entries()) {
     if (PG.cancelar) break;
-    prog.textContent = `Pegando ${i + 1} de ${van.length}… (${x.codigo || "punto"})`;
-    try { await S.api.crearPunto(capa, x.p.lat, x.p.lon, x.datos); ok++; }
-    catch (e) {
-      fallas.push(`${x.codigo || "punto " + (i + 1)}: ${e.message}`);
-      if (/crear_punto|function|schema cache|permiso|editor|failed to fetch|networkerror/i.test(e.message)) break; // no tiene sentido seguir
+    prog.textContent = `Pegando ${i + 1} de ${van.length}… (${x.codigo || "elemento"})`;
+    try {
+      if (DESTINO_POLIGONO.has(capa)) await S.api.crearPoligono(capa, x.verts.map((v) => [v.lon, v.lat]), x.datos);
+      else await S.api.crearPunto(capa, x.p.lat, x.p.lon, x.datos);
+      ok++;
+    } catch (e) {
+      fallas.push(`${x.codigo || "elemento " + (i + 1)}: ${e.message}`);
+      if (/crear_p|function|schema cache|permiso|editor|failed to fetch|networkerror|parte15/i.test(e.message)) break; // no tiene sentido seguir
     }
   }
   PG.corriendo = false;
@@ -3113,12 +3319,7 @@ async function pegarTodo(van) {
   $("#cancelar-pegar").onclick = cerrarPegar;
   if (ok) {
     aviso(`${ok} ${ok === 1 ? "elemento pegado" : "elementos pegados"}`);
-    if (capa === "relevamiento") S.capaOn.relev = true;
-    else {
-      const id = capa === "estructura" ? "obra_e" : "obras";
-      S.capaOn[id] = true;
-      CAPAS.filter((c) => c.tipo === capa).forEach((c) => (S.capaOn[c.id] = true));
-    }
+    prenderCapaDestino(capa);
     quitarMarcasPegar();
     await cargar();
   }
@@ -3134,6 +3335,410 @@ function alPegar(ev) {
   ev.preventDefault();
   if (PG.corriendo) return aviso("Esperá a que termine de pegar lo anterior.", true);
   abrirPegar(lote);
+}
+
+// ------------------------------------------------------------ agrimensura: Amojonamiento, Triángulos y Padrones
+// Como en QGIS: se ven de 1:15.000 para acá (zoom 15). Mojones: medio triángulo rojo sin relleno.
+// Triángulos: borde verde claro; los «Usable» (CÓDIGO DC) rayados. Padrones: borde claro con su número.
+const AG = { capas: null, renderer: null, geo: new WeakMap() };
+const ZOOM_AGRI = 15;
+const agriDeCerca = () => S.mapa && S.mapa.getZoom() >= ZOOM_AGRI;
+const COLOR_TRI = "#c3f4ca", COLOR_PADRON = "#fffef3", COLOR_MOJON = "#ff2e2e";
+const svgMojon = (px = 10) => `<svg width="${px}" height="${px}" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1 9 9H5z" fill="none" stroke="${COLOR_MOJON}" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+const svgTri = (usable) => `<svg width="18" height="14" viewBox="0 0 18 14" aria-hidden="true">${usable
+  ? `<defs><pattern id="ray-ref" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="${COLOR_TRI}" stroke-width="1"/></pattern></defs>` : ""}
+  <path d="M2 12 9 2l7 10z" fill="${usable ? "url(#ray-ref)" : "none"}" stroke="${COLOR_TRI}" stroke-width="${usable ? 1.8 : 1.2}" stroke-linejoin="round"/></svg>`;
+const svgPadron = () => `<svg width="18" height="14" viewBox="0 0 18 14" aria-hidden="true"><path d="M2 3h12l2 9H3z" fill="none" stroke="#d8d6c8" stroke-width="1.2"/></svg>`;
+
+// anillos [lat, lon] de un polígono guardado como GeoJSON (el texto se lee una sola vez)
+function anillosDe(x) {
+  if (!AG.geo.has(x)) {
+    let ll = null;
+    try {
+      const g = typeof x.geojson === "string" ? JSON.parse(x.geojson) : x.geojson;
+      const polis = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+      ll = polis.map((p) => p.map((anillo) => anillo.map(([lon, lat]) => [lat, lon])));
+    } catch (e) { ll = null; }
+    AG.geo.set(x, ll && ll.length ? ll : null);
+  }
+  return AG.geo.get(x);
+}
+
+function prepararAgri() {
+  if (AG.capas) return;
+  const pane = S.mapa.createPane("agri");
+  pane.style.zIndex = 380; // arriba de los departamentos, abajo de los símbolos
+  const etq = S.mapa.createPane("agriEtiquetas");
+  etq.style.zIndex = 385;
+  etq.style.pointerEvents = "none";
+  AG.renderer = L.svg({ pane: "agri", padding: 0.3 });
+  AG.capas = { padr: L.layerGroup().addTo(S.mapa), tri: L.layerGroup().addTo(S.mapa), amoj: L.layerGroup().addTo(S.mapa) };
+}
+// rayado de los triángulos «Usable», dentro del mismo SVG en que Leaflet dibuja los polígonos
+function ponerRayado() {
+  const svg = AG.renderer?._container;
+  if (svg && !svg.querySelector("#rayado-dc")) {
+    svg.insertAdjacentHTML("afterbegin", `<defs><pattern id="rayado-dc" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="7" stroke="${COLOR_TRI}" stroke-width="1.2"/></pattern></defs>`);
+  }
+}
+
+// Un toque en un mojón o polígono: mide, dibuja, ubica el punto nuevo o abre su ficha, según el modo
+function tocarAgri(ev, abrir, mojon) {
+  const ll = mojon ? L.latLng(mojon.lat, mojon.lon) : ev.latlng;
+  if (MED.activo) { L.DomEvent.stopPropagation(ev); agregarMedida(ll); return; }
+  if (DIB.activo) { L.DomEvent.stopPropagation(ev); agregarVertice(ll, mojon ? candidatoMojon(mojon) : null); return; }
+  if (!$("#nuevo").hidden) { L.DomEvent.stopPropagation(ev); if ($("#form-nuevo")) ponerMarca(ll.lat, ll.lng, false); return; }
+  L.DomEvent.stopPropagation(ev);
+  abrir();
+}
+
+function pintarAgrimensura() {
+  if (!S.mapa) return;
+  prepararAgri();
+  for (const g of Object.values(AG.capas)) g.clearLayers();
+  if (!agriDeCerca()) return;
+  const ab = S.abierta || {};
+  if (S.capaOn.padr) for (const p of S.datos.padr || []) {
+    const ll = anillosDe(p);
+    if (!ll) continue;
+    const sel = ab.tipo === "padr" && ab.id === p.id;
+    const pol = L.polygon(ll, { renderer: AG.renderer, pane: "agri", color: sel ? "#6CC4D1" : COLOR_PADRON, weight: sel ? 3 : 1,
+      fill: true, fillOpacity: 0, bubblingMouseEvents: false })
+      .on("click", (ev) => tocarAgri(ev, () => abrirAgri("padr", p.id))).addTo(AG.capas.padr);
+    if (p.padron != null && p.padron !== "") L.marker(pol.getBounds().getCenter(), { pane: "agriEtiquetas", interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "padron-num", html: `<span>${esc(p.padron)}</span>`, iconSize: [0, 0] }) }).addTo(AG.capas.padr);
+  }
+  if (S.capaOn.tri) for (const t of S.datos.tri || []) {
+    const ll = anillosDe(t);
+    if (!ll) continue;
+    const usable = normal(t.codigo) === "DC", sel = ab.tipo === "tri" && ab.id === t.id;
+    L.polygon(ll, { renderer: AG.renderer, pane: "agri", color: sel ? "#6CC4D1" : COLOR_TRI, weight: sel ? 3 : usable ? 1.8 : 1,
+      fill: true, fillColor: COLOR_TRI, fillOpacity: 0, className: usable ? "tri-usable" : "", bubblingMouseEvents: false })
+      .on("click", (ev) => tocarAgri(ev, () => abrirAgri("tri", t.id))).addTo(AG.capas.tri);
+  }
+  ponerRayado();
+  // mientras se dibuja un polígono, los mojones se ven siempre (para engancharse a ellos)
+  if (S.capaOn.amoj || DIB.activo) for (const m of S.datos.amoj || []) {
+    if (m.lat == null || m.lon == null) continue;
+    const sel = ab.tipo === "amoj" && ab.id === m.id;
+    L.marker([m.lat, m.lon], { keyboard: false, zIndexOffset: -600, title: `${m.codigo || "Mojón"}${m.descripcion ? ": " + m.descripcion : ""}`,
+      icon: L.divIcon({ className: `mk mk-mojon${sel ? " activo" : ""}`, html: svgMojon(sel ? 14 : 10), iconSize: [14, 14], iconAnchor: [7, 7] }) })
+      .on("click", (ev) => tocarAgri(ev, () => abrirAgri("amoj", m.id), m)).addTo(AG.capas.amoj);
+  }
+}
+
+// Área (m²) y perímetro (m) aproximados de una lista de vértices {lat, lon}
+function medidasDe(v) {
+  let per = 0, a = 0;
+  if (v.length < 2) return { area: 0, perimetro: 0 };
+  const lat0 = v.reduce((s, p) => s + p.lat, 0) / v.length, k = Math.cos(lat0 * Math.PI / 180);
+  for (let i = 0; i < v.length; i++) {
+    const p = v[i], q = v[(i + 1) % v.length];
+    if (i < v.length - 1 || v.length > 2) per += distM(p, q);
+    a += (p.lon * 111320 * k) * (q.lat * 110900) - (q.lon * 111320 * k) * (p.lat * 110900);
+  }
+  return { area: v.length >= 3 ? Math.abs(a / 2) : 0, perimetro: per };
+}
+const areaTxt = (m2) => (m2 >= 10000 ? `${numero(m2 / 10000, 2)} ha` : `${numero(m2, 0)} m²`);
+
+function abrirAgri(tipo, id) {
+  const lista = { amoj: S.datos.amoj, tri: S.datos.tri, padr: S.datos.padr }[tipo] || [];
+  const x = lista.find((y) => y.id === id);
+  if (!x) return;
+  $("#admin").hidden = true;
+  S.abierta = { tipo, id };
+  const ficha = $("#ficha");
+  ficha.hidden = false;
+  let cuerpo, titulo, sub, centro, copiar;
+  if (tipo === "amoj") {
+    titulo = x.codigo || "Sin código"; sub = "Mojón (amojonamiento)";
+    centro = [x.lat, x.lon];
+    copiar = `${Number(x.lat).toFixed(6)}, ${Number(x.lon).toFixed(6)}`;
+    cuerpo = `<dt>Descripción</dt><dd>${esc(x.descripcion) || "—"}</dd>
+      <dt>Latitud</dt><dd>${Number(x.lat).toFixed(6)}</dd><dt>Longitud</dt><dd>${Number(x.lon).toFixed(6)}</dd>`;
+  } else {
+    const ll = anillosDe(x) || [[[]]];
+    const v = ll[0][0].slice(0, -1).map(([lat, lon]) => ({ lat, lon }));
+    const md = medidasDe(v);
+    const b = L.latLngBounds(ll.flat(2));
+    centro = [b.getCenter().lat, b.getCenter().lng];
+    titulo = tipo === "padr" ? (x.padron ? "Padrón " + x.padron : "Padrón sin número") : x.codigo || "Sin código";
+    sub = tipo === "padr" ? "Padrón" : normal(x.codigo) === "DC" ? "Triángulo usable" : "Triángulo";
+    copiar = v.map((p) => `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}`).join("\n");
+    cuerpo = `<dt>Área</dt><dd>${areaTxt(x.area_m2 != null ? Number(x.area_m2) : md.area)}</dd>
+      <dt>Perímetro</dt><dd>${numero(md.perimetro, 1)} m</dd>
+      <dt>Vértices</dt><dd>${v.length}</dd>`;
+  }
+  ficha.innerHTML = `
+    <div class="ficha-cabeza">
+      ${barraCerrar("Volver al mapa")}
+      <p class="codigo">${esc(titulo)}</p>
+      <p class="tipo-obra">${sub}</p>
+      <div class="atajos">
+        ${atajo(`https://www.google.com/maps/dir/?api=1&destination=${centro[0]}%2C${centro[1]}&travelmode=driving`, "maps", "Maps")}
+        ${atajo(`https://waze.com/ul?ll=${centro[0]},${centro[1]}&navigate=yes`, "waze", "Waze")}
+        <button type="button" class="atajo" id="copiar-coord">${ICONO.copiar}<span>${tipo === "amoj" ? "Copiar" : "Vértices"}</span></button>
+      </div>
+    </div>
+    <div class="ficha-bloque"><h2>Datos</h2><dl class="datos">${cuerpo}</dl>
+      ${tipo === "amoj" ? "" : `<p class="nota" style="margin:8px 0 0">«Vértices» copia la latitud y longitud de cada vértice, uno por renglón.</p>`}</div>`;
+  enlazarCerrar(ficha, cerrarFicha);
+  $("#copiar-coord", ficha).onclick = async () => {
+    try { await navigator.clipboard.writeText(copiar); aviso(tipo === "amoj" ? "Coordenadas copiadas: " + copiar : "Vértices copiados"); }
+    catch (e) { aviso("No se pudo copiar. " + copiar.replace(/\n/g, " · "), true); }
+  };
+  pintar();
+  if (window.innerWidth > 760) S.mapa.panTo(centro);
+}
+
+function pintarUtilidadAgri() {
+  if (S.agriFalta) return `<p class="nota" style="margin:2px 0 6px 26px">Amojonamiento, Triángulos y Padrones: todavía no se pueden leer desde la web. Hay que correr sql/parte15_agrimensura.sql en Neon.</p>`;
+  const fila = (k, sim, nombre, n) => `<div class="nodo-capa"><span class="sim">${sim}</span>
+      <label><input type="checkbox" data-agri="${k}" ${S.capaOn[k] ? "checked" : ""}> ${nombre}</label><span class="n">${n}</span></div>`;
+  const algunaOn = S.capaOn.amoj || S.capaOn.tri || S.capaOn.padr;
+  return `${fila("amoj", svgMojon(11), "Amojonamiento", S.datos.amoj.length)}
+    ${fila("tri", svgTri(false), "Triángulos", S.datos.tri.length)}
+    ${fila("padr", svgPadron(), "Padrones", S.datos.padr.length)}
+    <p class="nota" style="margin:0 0 6px 26px">Como en QGIS, se ven solo de cerca (1:15.000). Triángulo rayado: usable (código DC).${algunaOn && !agriDeCerca() ? ` <button type="button" class="enlace" id="acercar-agri">Acercar para verlos</button>` : ""}</p>`;
+}
+
+// ------------------------------------------------------------ dibujar un polígono (Triángulos o Padrones)
+// Cada toque en el mapa agrega un vértice. Cerca de un mojón (o de un vértice de otro polígono)
+// se engancha a él; si no, queda como punto extra. Los vértices se arrastran para corregirlos.
+const DIB = { activo: false, destino: "triangulo", v: [], datos: {}, tocado: false, grupo: null };
+const RADIO_ENGANCHE = 24; // píxeles
+
+function candidatoMojon(m) { return { lat: m.lat, lon: m.lon, mojon: m.id, codigo: m.codigo || "" }; }
+// el mojón o vértice existente más cercano a un punto de la pantalla, si está a menos de RADIO_ENGANCHE
+function enganche(ll) {
+  const p0 = S.mapa.latLngToContainerPoint(ll);
+  let mejor = null, dmin = RADIO_ENGANCHE;
+  const probar = (lat, lon, c) => {
+    const d = p0.distanceTo(S.mapa.latLngToContainerPoint([lat, lon]));
+    if (d < dmin) { dmin = d; mejor = c; }
+  };
+  for (const m of S.datos.amoj || []) if (m.lat != null) probar(m.lat, m.lon, candidatoMojon(m));
+  // si no hay un mojón cerca, sirven los vértices de los triángulos y padrones que ya existen
+  if (!mejor) for (const x of [...(S.datos.tri || []), ...(S.datos.padr || [])]) {
+    for (const [lat, lon] of (anillosDe(x) || []).flat(2)) probar(lat, lon, { lat, lon, mojon: null, vertice: true });
+  }
+  return mejor;
+}
+
+function abrirDibujo(destino = "triangulo", verts = [], datos = {}) {
+  if (!editor()) return aviso("Solo un usuario con permiso de editor puede agregar polígonos.", true);
+  if (MED.activo) terminarMedida();
+  quitarMarcasPegar(); PG.lote = null;
+  if (!$("#nuevo").hidden) cerrarNuevo();
+  $("#ficha").hidden = true; $("#admin").hidden = true;
+  Object.assign(DIB, { activo: true, destino, datos: { ...datos }, tocado: Object.keys(datos).length > 0 });
+  DIB.v = verts.map((p) => {
+    const m = (S.datos.amoj || []).find((x) => distM(x, p) < 0.5);
+    return m ? candidatoMojon(m) : { lat: p.lat, lon: p.lon, mojon: null };
+  });
+  DIB.grupo = L.layerGroup().addTo(S.mapa);
+  S.mapa.off("click", clickDibujo).on("click", clickDibujo);
+  $("#mapa").classList.add("modo-nuevo");
+  $("#nuevo").hidden = false;
+  pintarDibujo();
+  dibujarDibujo();
+  pintar(false);
+  if (DIB.v.length) encuadrar(L.latLngBounds(DIB.v.map((p) => [p.lat, p.lon])), 18);
+}
+
+function terminarDibujo() {
+  DIB.activo = false;
+  DIB.grupo?.remove(); DIB.grupo = null;
+  S.mapa.off("click", clickDibujo);
+  $("#mapa").classList.remove("modo-nuevo");
+  $("#nuevo").hidden = true;
+  pintar(false);
+}
+
+function clickDibujo(ev) { if (!MED.activo) agregarVertice(ev.latlng); }
+
+function agregarVertice(ll, cand) {
+  const c = cand || enganche(ll) || { lat: ll.lat, lon: ll.lng, mojon: null };
+  const ult = DIB.v[DIB.v.length - 1];
+  if (ult && distM(ult, c) < 0.05) return; // el mismo punto dos veces seguidas
+  // tocar de nuevo el primer vértice cierra el polígono: no hace falta repetirlo
+  if (DIB.v.length >= 3 && distM(DIB.v[0], c) < 0.05) return cerrarPoligono();
+  DIB.v.push(c);
+  sugerirCodigo();
+  dibujarDibujo();
+  actualizarMedidas();
+}
+
+function cerrarPoligono() {
+  aviso(`Polígono cerrado con ${DIB.v.length} vértices: completá los datos y guardá`);
+  const f = $("#form-dibujo");
+  (f?.padron || f?.codigo)?.focus({ preventScroll: true });
+  $("#dib-guardar")?.scrollIntoView({ block: "nearest" });
+}
+
+// El código del triángulo: el que más se repite entre los mojones usados (si no se escribió otro)
+function sugerirCodigo() {
+  if (DIB.destino !== "triangulo" || DIB.tocado) return;
+  const cuenta = {};
+  for (const p of DIB.v) if (p.codigo) cuenta[p.codigo] = (cuenta[p.codigo] || 0) + 1;
+  const mas = Object.entries(cuenta).sort((a, b) => b[1] - a[1])[0];
+  if (mas) {
+    DIB.datos["CÓDIGO"] = mas[0];
+    const f = $("#form-dibujo");
+    if (f?.codigo) f.codigo.value = mas[0];
+  }
+}
+
+function dibujarDibujo() {
+  if (!DIB.grupo) return;
+  DIB.grupo.clearLayers();
+  const ll = DIB.v.map((p) => [p.lat, p.lon]);
+  if (ll.length >= 3) L.polygon(ll, { color: "#6CC4D1", weight: 2.5, dashArray: "6 4", fillColor: "#6CC4D1", fillOpacity: 0.15, interactive: false }).addTo(DIB.grupo);
+  else if (ll.length === 2) L.polyline(ll, { color: "#6CC4D1", weight: 2.5, dashArray: "6 4", interactive: false }).addTo(DIB.grupo);
+  DIB.v.forEach((p, i) => {
+    const cls = `vertice${p.mojon ? " en-mojon" : p.vertice ? " en-vertice" : ""}${i === 0 ? " primero" : ""}`;
+    const mk = L.marker([p.lat, p.lon], { draggable: true, keyboard: false, zIndexOffset: 3000, autoPan: true,
+      title: i === 0 && DIB.v.length >= 3 ? "Primer vértice: tocalo para cerrar" : p.mojon ? `Mojón ${p.codigo || ""}` : "Punto extra",
+      icon: L.divIcon({ className: cls, html: `<span>${i + 1}</span>`, iconSize: [22, 22], iconAnchor: [11, 11] }) });
+    mk.on("click", (ev) => {
+      L.DomEvent.stopPropagation(ev);
+      if (i === 0 && DIB.v.length >= 3) return cerrarPoligono();
+      DIB.v.splice(i, 1);
+      aviso(`Vértice ${i + 1} quitado`);
+      dibujarDibujo(); actualizarMedidas();
+    });
+    mk.on("drag", (ev) => {
+      const q = ev.target.getLatLng();
+      DIB.v[i] = { lat: q.lat, lon: q.lng, mojon: null };
+      const otros = DIB.grupo.getLayers().find((c) => c instanceof L.Polygon || c instanceof L.Polyline);
+      if (otros) otros.setLatLngs(DIB.v.map((x) => [x.lat, x.lon]));
+    });
+    mk.on("dragend", (ev) => {
+      const q = ev.target.getLatLng();
+      DIB.v[i] = enganche(q) || { lat: q.lat, lon: q.lng, mojon: null };
+      sugerirCodigo(); dibujarDibujo(); actualizarMedidas();
+    });
+    mk.addTo(DIB.grupo);
+  });
+}
+
+function actualizarMedidas() {
+  const el = $("#dib-medidas");
+  if (!el) return;
+  const n = DIB.v.length, md = medidasDe(DIB.v), enMojon = DIB.v.filter((p) => p.mojon).length;
+  el.innerHTML = n === 0 ? "Todavía no hay vértices: tocá el mapa."
+    : `<b>${n} ${n === 1 ? "vértice" : "vértices"}</b>${enMojon ? ` (${enMojon} en mojones)` : ""}${n >= 3 ? ` · área ${areaTxt(md.area)} · perímetro ${numero(md.perimetro, 1)} m` : n === 2 ? ` · ${numero(md.perimetro, 1)} m` : ""}`;
+  $("#dib-deshacer").disabled = $("#dib-borrar").disabled = n === 0;
+  $("#dib-guardar").disabled = n < 3;
+  $("#dib-zoom").hidden = agriDeCerca();
+}
+
+function listaCodigosAgri() {
+  const cods = [...new Set(["DC", ...S.datos.amoj.map((m) => m.codigo), ...S.datos.tri.map((t) => t.codigo), ...S.datos.estructura.map((e) => e.codigo)]
+    .filter(Boolean).map(String))].sort((a, b) => a.localeCompare(b, "es"));
+  return `<datalist id="dl-cod-agri">${cods.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>`;
+}
+
+function pintarDibujo() {
+  const caja = $("#nuevo"), tri = DIB.destino === "triangulo";
+  caja.innerHTML = `
+    <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Dibujar polígono</h2>
+      <p class="nota" style="margin:0">Tocá el mapa para marcar cada vértice. Cerca de un mojón, el vértice se engancha a él (rojo); en otro lugar queda como punto extra (blanco). Arrastrá un vértice para moverlo o tocalo para sacarlo. Tocá el 1 para cerrar.</p></div>
+    <form class="form" id="form-dibujo" novalidate>
+      <div class="ficha-bloque">
+        <h2>Capa</h2>
+        <div class="segmentado" role="radiogroup">
+          <label><input type="radio" name="destino" value="triangulo" ${tri ? "checked" : ""}> Triángulos</label>
+          <label><input type="radio" name="destino" value="padron" ${tri ? "" : "checked"}> Padrones</label>
+        </div>
+      </div>
+      <div class="ficha-bloque">
+        <h2>Vértices</h2>
+        <p class="nota" id="dib-medidas" style="margin:0 0 8px"></p>
+        <p class="nota" id="dib-zoom" hidden style="margin:0 0 8px">Acercate en el mapa para ver los mojones: se muestran desde 1:15.000. <button type="button" class="enlace" id="dib-acercar">Acercar</button></p>
+        <div class="dos">
+          <button class="boton" type="button" id="dib-deshacer">Deshacer último</button>
+          <button class="boton" type="button" id="dib-borrar">Borrar todos</button>
+        </div>
+        <details class="dib-coords">
+          <summary>Cargar vértices desde coordenadas (Excel)</summary>
+          <textarea id="dib-texto" class="pegar-texto" rows="4" placeholder="Pegá X e Y (UTM) o latitud y longitud, un vértice por renglón"></textarea>
+          <p class="error" id="dib-error-coord" hidden></p>
+          <button class="boton boton-chico" type="button" id="dib-cargar">Cargar vértices</button>
+        </details>
+      </div>
+      <div class="ficha-bloque">
+        <h2>Datos</h2>
+        ${tri ? `<label>Código<input name="codigo" list="dl-cod-agri" autocomplete="off" value="${esc(DIB.datos["CÓDIGO"] || "")}" placeholder="Se completa con el de los mojones; DC si es usable"></label>${listaCodigosAgri()}`
+          : `<label>Número de padrón<input name="padron" inputmode="numeric" autocomplete="off" value="${esc(DIB.datos.PADRON || "")}"></label>`}
+      </div>
+      <div class="ficha-bloque acciones-nuevo">
+        <p class="error" id="dib-error" hidden></p>
+        <button class="boton boton-primario" type="submit" id="dib-guardar">Guardar ${tri ? "triángulo" : "padrón"}</button>
+        <button class="boton" type="button" id="dib-cancelar">Cancelar</button>
+      </div>
+    </form>`;
+  enlazarCerrar(caja, salirDibujo);
+  const f = $("#form-dibujo");
+  $("#dib-cancelar").onclick = salirDibujo;
+  f.querySelectorAll("input[name=destino]").forEach((r) => (r.onchange = () => { DIB.destino = r.value; pintarDibujo(); }));
+  if (f.codigo) f.codigo.oninput = () => { DIB.tocado = true; DIB.datos["CÓDIGO"] = f.codigo.value.trim(); };
+  if (f.padron) f.padron.oninput = () => { DIB.datos.PADRON = f.padron.value.trim(); };
+  $("#dib-deshacer").onclick = () => { DIB.v.pop(); dibujarDibujo(); actualizarMedidas(); };
+  $("#dib-borrar").onclick = () => { if (confirm("¿Borrar todos los vértices dibujados?")) { DIB.v = []; dibujarDibujo(); actualizarMedidas(); } };
+  $("#dib-acercar").onclick = () => S.mapa.setZoom(ZOOM_AGRI);
+  $("#dib-cargar").onclick = () => {
+    const pts = leerListaCoordenadas($("#dib-texto").value), err = $("#dib-error-coord");
+    const sis = sistemaDe({ filas: pts.map((p) => ({ geo: p })) });
+    const verts = pts.map((p) => aGrados(p, sis)).filter((p) => p && dentroDeUruguay(p.lat, p.lon));
+    if (verts.length < 1) { err.textContent = "No encontré coordenadas en Uruguay en lo pegado."; err.hidden = false; return; }
+    err.hidden = true;
+    if (DIB.v.length && !confirm(`¿Reemplazar los ${DIB.v.length} vértices dibujados por los ${verts.length} pegados?`)) return;
+    const nro = $("#dib-texto").value.match(/padr[oó]n\D{0,6}(\d{1,7})/i);
+    if (nro && !tri) { DIB.datos.PADRON = nro[1]; f.padron.value = nro[1]; }
+    DIB.v = verts.map((p) => { const m = (S.datos.amoj || []).find((x) => distM(x, p) < 0.5); return m ? candidatoMojon(m) : { ...p, mojon: null }; });
+    sugerirCodigo(); dibujarDibujo(); actualizarMedidas();
+    encuadrar(L.latLngBounds(DIB.v.map((p) => [p.lat, p.lon])), 18);
+    $(".dib-coords").open = false;
+  };
+  f.onsubmit = guardarDibujo;
+  actualizarMedidas();
+}
+
+function salirDibujo() {
+  if (DIB.v.length >= 2 && !confirm("¿Salir sin guardar el polígono dibujado?")) return;
+  terminarDibujo();
+}
+
+async function guardarDibujo(ev) {
+  ev.preventDefault();
+  const f = ev.target, err = $("#dib-error"), b = $("#dib-guardar");
+  const mal = (t) => { err.textContent = t; err.hidden = false; };
+  err.hidden = true;
+  if (DIB.v.length < 3) return mal("Un polígono necesita al menos 3 vértices.");
+  const datos = {};
+  if (DIB.destino === "triangulo") { const c = f.codigo.value.trim(); if (c) datos["CÓDIGO"] = c; }
+  else {
+    const n = f.padron.value.trim();
+    if (n && !/^\d{1,9}$/.test(n)) { f.padron.focus(); return mal("El número de padrón tiene que ser un número entero, sin puntos."); }
+    if (n) datos.PADRON = n;
+    if (n && S.datos.padr.some((p) => String(p.padron) === n) && !confirm(`Ya hay un padrón ${n}. ¿Lo agrego igual?`)) return;
+  }
+  b.disabled = true; b.textContent = "Guardando…";
+  const destino = DIB.destino;
+  try {
+    const id = await S.api.crearPoligono(destino, DIB.v.map((p) => [p.lon, p.lat]), datos);
+    aviso(destino === "padron" ? `Padrón ${datos.PADRON || ""} agregado` : `Triángulo ${datos["CÓDIGO"] || ""} agregado`);
+    prenderCapaDestino(destino);
+    DIB.v = [];
+    terminarDibujo();
+    await cargar();
+    if (id) abrirAgri(destino === "padron" ? "padr" : "tri", Number(id));
+  } catch (e) {
+    mal(e.message);
+    b.disabled = false; b.textContent = `Guardar ${destino === "triangulo" ? "triángulo" : "padrón"}`;
+  }
 }
 
 // ------------------------------------------------------------ relevamiento (como en QGIS: círculo blanco chico con el código)

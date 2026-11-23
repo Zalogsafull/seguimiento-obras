@@ -52,6 +52,19 @@ async function crearNeon() {
     async estructuras() { return chequear(await neon.from("v_estructuras").select("*"), "Estructuras"); },
     async obras() { return chequear(await neon.from("v_obras").select("*"), "Obras"); },
     async relevamiento() { return chequear(await neon.from("v_relevamiento").select("*"), "Relevamiento"); },
+    // Amojonamiento, Triángulos y Padrones (sql/parte15_agrimensura.sql)
+    async agrimensura() {
+      const [a, t, p] = await Promise.all([neon.from("v_amojonamiento").select("*"), neon.from("v_triangulos").select("*"),
+        neon.from("v_padrones").select("*")]);
+      return { amoj: chequear(a, "Amojonamiento"), tri: chequear(t, "Triángulos"), padr: chequear(p, "Padrones") };
+    },
+    async crearPoligono(capa, vertices, datos) {
+      const { data, error } = await neon.rpc("crear_poligono", { p_capa: capa, p_vertices: vertices, p_datos: datos });
+      if (error) throw new Error(/crear_poligono|schema cache|could not find/i.test(error.message)
+        ? "Falta preparar la base: corré sql/parte15_agrimensura.sql en Neon y tocá Refresh schema cache."
+        : error.message);
+      return data;
+    },
     async una(tipo, id) {
       const vista = tipo === "estructura" ? "v_estructuras" : "v_obras";
       return chequear(await neon.from(vista).select("*").eq("id", id).single(), "Obra");
@@ -159,6 +172,15 @@ function crearDemo() {
     { id: 2, codigo: "P2", descripcion: "Esquina del cerco", z: "37.95", lat: -34.8806, lon: -56.1781 },
     { id: 3, codigo: "BM", descripcion: "Mojón de referencia", z: null, lat: -34.7905, lon: -55.8512 },
   ];
+  // Amojonamiento, Triángulos y Padrones junto a la estructura CPD
+  const M = (id, codigo, lat, lon) => ({ id, codigo, descripcion: "VERTICE TRIANGULO", lat, lon });
+  const pol = (pts) => JSON.stringify({ type: "Polygon", coordinates: [[...pts, pts[0]].map(([la, lo]) => [lo, la])] });
+  const agri = {
+    amoj: [M(1, "CPD", -34.7893, -55.8508), M(2, "CPD", -34.7905, -55.8489), M(3, "CPD", -34.7911, -55.8513),
+      M(4, "CPD", -34.7899, -55.8524)],
+    tri: [{ id: 1, codigo: "DC", area_m2: 1210, geojson: pol([[-34.7893, -55.8508], [-34.7905, -55.8489], [-34.7911, -55.8513]]) }],
+    padr: [{ id: 1, padron: "21278", area_m2: 45230, geojson: pol([[-34.7880, -55.8540], [-34.7880, -55.8470], [-34.7925, -55.8470], [-34.7925, -55.8540]]) }],
+  };
   let hid = 1, cid = 1;
   const hitos = [], cuaderno = [];
   for (const [tipo, lista] of [["estructura", est], ["obra", obr]]) {
@@ -227,6 +249,11 @@ function crearDemo() {
     async adminUsuarios() { await espera(); return structuredClone(cuentas); },
     async crearPunto(capa, lat, lon, d) {
       await espera();
+      if (capa === "amojonamiento") {
+        const id = Math.max(0, ...agri.amoj.map((x) => x.id)) + 1;
+        agri.amoj.push({ id, codigo: d["CÓDIGO"] || null, descripcion: d.DESCRIPCION || null, lat, lon });
+        return id;
+      }
       if (capa === "relevamiento") {
         const id = Math.max(0, ...relev.map((x) => x.id)) + 1;
         relev.push({ id, codigo: d["CÓDIGO"] || null, descripcion: d["DESCRIPCIÓN"] || null, z: d["Z"] ?? null, lat, lon });
@@ -269,6 +296,22 @@ function crearDemo() {
     async estructuras() { await espera(); return structuredClone(est); },
     async obras() { await espera(); return structuredClone(obr); },
     async relevamiento() { await espera(); return structuredClone(relev); },
+    async agrimensura() { await espera(); return structuredClone(agri); },
+    async crearPoligono(capa, v, d) {
+      await espera();
+      const lista = capa === "padron" ? agri.padr : agri.tri;
+      const id = Math.max(0, ...lista.map((x) => x.id)) + 1;
+      const anillo = [...v, v[0]];
+      let a = 0; // área aproximada en m²
+      for (let i = 0; i < v.length; i++) {
+        const [x1, y1] = v[i], [x2, y2] = v[(i + 1) % v.length];
+        a += (x1 * 94650) * (y2 * 110900) - (x2 * 94650) * (y1 * 110900);
+      }
+      const g = JSON.stringify({ type: "Polygon", coordinates: [anillo] });
+      if (capa === "padron") lista.push({ id, padron: d.PADRON ?? null, area_m2: Math.abs(a / 2), geojson: g });
+      else lista.push({ id, codigo: d["CÓDIGO"] ?? null, area_m2: Math.abs(a / 2), geojson: g });
+      return id;
+    },
     async una(t, id) { await espera(); return structuredClone(lista(t).find((x) => x.id === id)); },
     async hitos(t, id) { await espera(); return structuredClone(hitos.filter((h) => h[clave(t)] === id)); },
     async cuaderno(t, id) { await espera(); return structuredClone(cuaderno.filter((c) => c[clave(t)] === id).reverse()); },

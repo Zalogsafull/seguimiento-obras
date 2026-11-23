@@ -468,3 +468,25 @@ body.con-tabla .mapa-zona { display: none; }
 .modal h2 { margin: 0; font-size: 19px; }
 .modal .nota { margin: 0; }
 .campo-do { display: grid; gap: 6px; }
+
+/* agrimensura: Amojonamiento, Triángulos y Padrones (como en QGIS) */
+.leaflet-pane path.tri-usable { fill: url(#rayado-dc); fill-opacity: 1; }
+.mk-mojon { display: grid; place-items: center; }
+.mk-mojon.activo svg { filter: drop-shadow(0 0 3px #6CC4D1); }
+.padron-num span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; font-size: 12px; color: #fff;
+  text-shadow: 0 0 2px #000, 0 0 3px #000; pointer-events: none; }
+.segmentado.cuatro { grid-template-columns: 1fr 1fr; grid-auto-flow: row; }
+.segmentado.cuatro label + label { border-left: 0; }
+.segmentado.cuatro label:nth-child(even) { border-left: 1px solid var(--linea); }
+.segmentado.cuatro label:nth-child(n+3) { border-top: 1px solid var(--linea); }
+.botones-nuevo { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.botones-nuevo .boton-pegar { margin-top: 0; }
+.dib-coords { margin-top: 10px; }
+.dib-coords summary { cursor: pointer; font-size: 13.5px; color: var(--acento); padding: 4px 0; }
+.dib-coords textarea { margin: 6px 0; }
+/* vértices del polígono que se está dibujando */
+.vertice span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; box-sizing: border-box;
+  background: #fff; color: #1e1e1e; border: 2px solid #6CC4D1; font: 600 11px/1 system-ui, sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.vertice.en-mojon span { background: #ff2e2e; color: #fff; border-color: #fff; }
+.vertice.en-vertice span { background: #c3f4ca; color: #1e1e1e; border-color: #fff; }
+.vertice.primero span { outline: 2px solid #6CC4D1; outline-offset: 2px; }
