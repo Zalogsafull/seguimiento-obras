@@ -81,8 +81,23 @@ async function crearNeon() {
     async crearPunto(capa, lat, lon, datos) {
       return chequear(await neon.rpc("crear_punto", { p_capa: capa, p_lat: lat, p_lon: lon, p_datos: datos }), "Agregar punto");
     },
-    async adminHabilitar(user_id, nombre, rol, iniciales) {
-      chequear(await neon.rpc("admin_habilitar", { p_user_id: user_id, p_nombre: nombre, p_rol: rol, p_iniciales: iniciales }), "Habilitar");
+    // conObras: true = director de obra (ve primero sus obras), false = ve todas.
+    // Sin la parte 14 la función no acepta el tipo: se guarda igual el resto y se avisa.
+    async adminHabilitar(user_id, nombre, rol, iniciales, conObras) {
+      const base = { p_user_id: user_id, p_nombre: nombre, p_rol: rol, p_iniciales: iniciales };
+      const r = await neon.rpc("admin_habilitar", { ...base, p_con_obras: conObras });
+      if (r.error && /p_con_obras|schema cache|could not find the function/i.test(r.error.message)) {
+        chequear(await neon.rpc("admin_habilitar", base), "Habilitar");
+        return { sinTipo: true };
+      }
+      chequear(r, "Habilitar");
+      return {};
+    },
+    async elegirMiDO(iniciales) {
+      const { error } = await neon.rpc("elegir_mi_do", { p_iniciales: iniciales });
+      if (error) throw new Error(/elegir_mi_do|schema cache|could not find/i.test(error.message)
+        ? "Falta preparar la base: el administrador tiene que correr sql/parte14_tipo_usuario.sql en Neon."
+        : error.message);
     },
     async adminQuitar(user_id) { chequear(await neon.rpc("admin_quitar", { p_user_id: user_id }), "Quitar acceso"); },
     async pedirBorrado(tipo, id, motivo) {
@@ -185,10 +200,14 @@ function crearDemo() {
     if (o.etapa >= 6) { o.recepcion = "RD"; o.dias_para_recepcion = null; }
   };
   const cuentas = [
-    { user_id: "u-juan", email: "juan.perez@ejemplo.com", nombre_cuenta: "Juan Pérez", registrado: dia(-1), nombre: null, rol: null, iniciales_do: null, admin: false, habilitado: false },
-    { user_id: "demo", email: "dtdoici@gmail.com", nombre_cuenta: "G.S.", registrado: dia(-10), nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true, habilitado: true },
-    { user_id: "u-ana", email: "ana@ejemplo.com", nombre_cuenta: "Ana", registrado: dia(-6), nombre: "Ana", rol: "LECTOR", iniciales_do: "A.R.", admin: false, habilitado: true },
+    { user_id: "u-juan", email: "juan.perez@ejemplo.com", nombre_cuenta: "Juan Pérez", registrado: dia(-1), nombre: null, rol: null, iniciales_do: null, admin: false, habilitado: false, con_obras: false },
+    { user_id: "demo", email: "dtdoici@gmail.com", nombre_cuenta: "G.S.", registrado: dia(-10), nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true, habilitado: true, con_obras: true },
+    { user_id: "u-ana", email: "ana@ejemplo.com", nombre_cuenta: "Ana", registrado: dia(-6), nombre: "Ana", rol: "LECTOR", iniciales_do: null, admin: false, habilitado: true, con_obras: false },
   ];
+  // ?demo=1&do=0 entra como usuario "con obras" que todavía no eligió su D.O.; &do=todas, como usuario que ve todas
+  const modoDO = new URLSearchParams(location.search).get("do");
+  const yo = { user_id: "demo", nombre: "Gonza", rol: "EDITOR", admin: true,
+    con_obras: modoDO !== "todas", iniciales_do: modoDO === "0" || modoDO === "todas" ? null : "G.S." };
   // en la demostración la sesión queda guardada en el navegador, como en la versión real
   let sesion = null;
   try { sesion = JSON.parse(localStorage.getItem("obras-oici-demo-sesion") || "null"); } catch (e) { /* sin almacenamiento */ }
@@ -203,7 +222,8 @@ function crearDemo() {
     async salir() { sesion = null; recordar(null); },
     async pedirReseteo() { await espera(); },
     async nuevaContrasena() { await espera(); },
-    async perfil() { await espera(); return { user_id: "demo", nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true }; },
+    async perfil() { await espera(); return structuredClone(yo); },
+    async elegirMiDO(ini) { await espera(); yo.iniciales_do = ini; Object.assign(cuentas.find((c) => c.user_id === "demo"), { iniciales_do: ini }); },
     async adminUsuarios() { await espera(); return structuredClone(cuentas); },
     async crearPunto(capa, lat, lon, d) {
       await espera();
@@ -225,8 +245,11 @@ function crearDemo() {
       }
       return id;
     },
-    async adminHabilitar(id, nombre, rol, ini) {
-      Object.assign(cuentas.find((c) => c.user_id === id), { nombre, rol, iniciales_do: ini, habilitado: true });
+    async adminHabilitar(id, nombre, rol, ini, conObras) {
+      const con = conObras ?? !!ini;
+      Object.assign(cuentas.find((c) => c.user_id === id), { nombre, rol, iniciales_do: con ? ini || null : null, habilitado: true, con_obras: con });
+      if (id === "demo") Object.assign(yo, { nombre, rol, iniciales_do: con ? ini || null : null, con_obras: con });
+      return {};
     },
     async pedirBorrado(tipo, id, motivo) {
       await espera();

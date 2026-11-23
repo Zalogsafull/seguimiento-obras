@@ -455,3 +455,16 @@ body.con-tabla .mapa-zona { display: none; }
 .pegar-lista { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow: auto; border-top: 1px solid var(--linea); }
 .pegar-lista li { padding: 5px 0; border-bottom: 1px solid var(--linea); font-size: 13.5px; }
 .pegar-lista .nota { margin-left: 6px; }
+
+/* sugerencias de los campos con lista (reemplazan el datalist del navegador) */
+.sugerencias { position: fixed; z-index: 5000; margin: 0; padding: 4px 0; list-style: none; overflow-y: auto;
+  background: var(--superficie); border: 1px solid var(--linea); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.sugerencias li { padding: 10px 12px; font-size: 15px; cursor: pointer; color: var(--tinta); }
+.sugerencias li:hover, .sugerencias li.activa { background: var(--acento-claro); color: #fff; }
+
+/* pregunta "¿Qué director de obra sos?" */
+.modal-fondo { position: fixed; inset: 0; z-index: 4000; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 16px; }
+.modal { width: min(420px, 100%); background: var(--superficie); border: 1px solid var(--linea); border-radius: 12px; padding: 18px; display: grid; gap: 10px; }
+.modal h2 { margin: 0; font-size: 19px; }
+.modal .nota { margin: 0; }
+.campo-do { display: grid; gap: 6px; }

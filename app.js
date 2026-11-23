@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-20-31";
+import { crearApi } from "./api.js?v=2026-11-23-1";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -163,6 +163,12 @@ function leerEstado() {
     if (typeof g.callesGris === "number") S.callesGris = Math.min(Math.max(g.callesGris, 0), 0.8);
   } catch (e) { /* estado guardado inválido: se ignora */ }
 }
+// Tipo de usuario: "con obras" (es director de obra y ve primero las suyas) o "ve todas".
+// Sin la parte 14 en la base no viene con_obras: tener iniciales equivale a "con obras".
+// Todos los directores de obra que figuran en las estructuras y obras (aunque la capa esté apagada)
+const todosLosDO = () => [...new Set([...LISTA_DO, ...[...S.datos.estructura, ...S.datos.obra].flatMap((o) => partesDO(o.director_obra))])]
+  .sort((a, b) => a.localeCompare(b, "es"));
+const conObras = () => !!S.perfil && (S.perfil.con_obras ?? !!S.perfil.iniciales_do);
 const partesDO = (v) => String(v || "").split(/[\/,;]+|\s+y\s+/).map((p) => p.trim()).filter(Boolean);
 
 function esMia(o) {
@@ -438,6 +444,9 @@ function mostrarApp() {
   ponerUsuario();
   if (S.appLista) return;
   S.appLista = true;
+  // quien tiene obras entra viendo las suyas (después puede apagar «Mis obras» en Filtros)
+  if (conObras() && S.perfil.iniciales_do) S.f.mias = true;
+  $("#mi-do").onclick = () => preguntarDO(true);
   $("#boton-nuevo").onclick = abrirNuevo;
   document.addEventListener("paste", alPegar);
   $("#recargar").onclick = () => {
@@ -545,6 +554,7 @@ async function cargar() {
   estadoDatos(null);
   cargarSolicitudes();
   pintar();
+  if (S.verificado && !S.preguntadoDO && conObras() && !S.perfil.iniciales_do) { S.preguntadoDO = true; preguntarDO(false); }
   if (UI.modo === "ajustes" && !UI.plegado) pintarAjustes();
   if (!$("#tabla").hidden && !document.querySelector("#tabla .editando")) pintarTabla();
 }
@@ -1469,7 +1479,10 @@ function mostrarImportacion(tipo, nombre, cambios, problemas, sinId) {
 function pintarAjustes() {
   pintarSolicitudes();
   const rol = editor() ? "Editor" : "Solo lectura";
-  $("#cuenta-detalle").textContent = [S.usuario?.email, rol, S.perfil?.iniciales_do ? "D.O. " + S.perfil.iniciales_do : ""].filter(Boolean).join(" · ");
+  $("#cuenta-detalle").textContent = [S.usuario?.email, rol,
+    conObras() ? (S.perfil.iniciales_do ? "Director de obra " + S.perfil.iniciales_do : "Director de obra (sin elegir)") : "Ve todas las obras"].filter(Boolean).join(" · ");
+  $("#mi-do").hidden = !conObras();
+  $("#mi-do").textContent = S.perfil?.iniciales_do ? "Cambiar mi director de obra" : "Elegir mi director de obra";
   const m = $("#ajustes-mapa");
   m.innerHTML = `
     <div class="segmentado bases-seg" role="radiogroup" aria-label="Mapa base">${Object.keys(S.base).map((b) =>
@@ -1959,43 +1972,66 @@ async function abrirAdmin() {
       : e.message;
     return;
   }
-  const dirs = [...new Set(todas().flatMap((x) => partesDO(x.o.director_obra)))].sort();
+  const dirs = todosLosDO();
   const pend = cuentas.filter((c) => !c.habilitado), con = cuentas.filter((c) => c.habilitado);
+  const tipoSel = (con) => `<select name="tipo"><option value="obras" ${con ? "selected" : ""}>Con obras (director de obra)</option>
+      <option value="todas" ${con ? "" : "selected"}>Ve todas las obras</option></select>`;
+  const doSel = (actual, con) => {
+    const lista = [...new Set([...dirs, ...(actual ? [actual] : [])])].sort((a, b) => a.localeCompare(b, "es"));
+    return `<div class="campo-do" ${con ? "" : "hidden"}><label>Director de obra<select name="ini">
+        <option value="">Que lo elija el usuario al entrar</option>
+        ${lista.map((d) => `<option ${d === actual ? "selected" : ""}>${esc(d)}</option>`).join("")}
+        <option value="__otro">Otro (escribir)…</option></select></label>
+      <input name="ini_otro" placeholder="Iniciales como figuran en D.O., ej. G.S." autocomplete="off" hidden></div>`;
+  };
+  const tipoTexto = (c) => (c.con_obras ?? !!c.iniciales_do) ? `con obras${c.iniciales_do ? " · " + esc(c.iniciales_do) : " · D.O. sin elegir"}` : "ve todas";
   const rolSel = (r) => `<select name="rol"><option value="EDITOR" ${r === "EDITOR" ? "selected" : ""}>Editor</option><option value="LECTOR" ${r === "LECTOR" ? "selected" : ""}>Solo lectura</option></select>`;
   const reg = (c) => (c.registrado ? "se registró el " + fecha(String(c.registrado).slice(0, 10)) : "");
   caja.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Usuarios</h2>
       <p class="nota">Quien se registra en la web aparece acá. Habilitalo para que vea las obras.</p></div>
-    <datalist id="lista-do">${dirs.map((d) => `<option value="${esc(d)}">`).join("")}</datalist>
     <div class="ficha-bloque">
       <h2>Esperando habilitación <span class="cuenta">${pend.length || ""}</span></h2>
       ${pend.length ? pend.map((c) => `<form class="form cuenta-form" data-id="${esc(c.user_id)}">
           <p class="cuenta-mail"><b>${esc(c.email)}</b><br><small>${esc(c.nombre_cuenta || "")} ${reg(c)}</small></p>
           <label>Nombre<input name="nombre" value="${esc(c.nombre_cuenta || "")}" required></label>
           <div class="dos"><label>Permiso${rolSel("EDITOR")}</label>
-          <label>Iniciales D.O.<input name="ini" list="lista-do" placeholder="G.S."></label></div>
+          <label>Tipo de usuario${tipoSel(false)}</label></div>
+          ${doSel("", false)}
           <button class="boton boton-primario" type="submit">Habilitar</button>
         </form>`).join("") : `<p class="nota">No hay cuentas nuevas. Cuando alguien use "Crear cuenta" en la web, va a aparecer acá.</p>`}
     </div>
     <div class="ficha-bloque">
       <h2>Con acceso <span class="cuenta">${con.length}</span></h2>
       ${con.map((c) => `<form class="form cuenta-form" data-id="${esc(c.user_id)}">
-          <p class="cuenta-mail"><b>${esc(c.nombre)}</b>${c.admin ? ' <span class="etiqueta">administrador</span>' : ""}<br><small>${esc(c.email)}</small></p>
+          <p class="cuenta-mail"><b>${esc(c.nombre)}</b>${c.admin ? ' <span class="etiqueta">administrador</span>' : ""}<br><small>${esc(c.email)} · ${tipoTexto(c)}</small></p>
           <input type="hidden" name="nombre" value="${esc(c.nombre)}">
           <div class="dos"><label>Permiso${rolSel(c.rol)}</label>
-          <label>Iniciales D.O.<input name="ini" list="lista-do" value="${esc(c.iniciales_do || "")}"></label></div>
+          <label>Tipo de usuario${tipoSel(c.con_obras ?? !!c.iniciales_do)}</label></div>
+          ${doSel(c.iniciales_do || "", c.con_obras ?? !!c.iniciales_do)}
           <div class="acciones"><button class="boton" type="submit">Guardar cambios</button>
           ${c.user_id === S.perfil.user_id ? "" : `<button class="boton boton-peligro" type="button" data-quitar>Quitar acceso</button>`}</div>
         </form>`).join("")}
     </div>`;
   enlazarCerrar(caja, () => { caja.hidden = true; });
   caja.querySelectorAll(".cuenta-form").forEach((f) => {
+    const campoDO = f.querySelector(".campo-do");
+    f.tipo.onchange = () => (campoDO.hidden = f.tipo.value !== "obras");
+    f.ini.onchange = () => { f.ini_otro.hidden = f.ini.value !== "__otro"; if (!f.ini_otro.hidden) f.ini_otro.focus(); };
     f.onsubmit = async (ev) => {
       ev.preventDefault();
+      const con = f.tipo.value === "obras";
+      const ini = !con ? "" : f.ini.value === "__otro" ? f.ini_otro.value.trim() : f.ini.value;
+      if (con && f.ini.value === "__otro" && !ini) { f.ini_otro.focus(); return aviso("Escribí las iniciales del director de obra.", true); }
       f.querySelectorAll("button").forEach((b) => (b.disabled = true));
       try {
-        await S.api.adminHabilitar(f.dataset.id, f.nombre.value.trim(), f.rol.value, f.ini.value.trim());
+        const r = await S.api.adminHabilitar(f.dataset.id, f.nombre.value.trim(), f.rol.value, ini, con);
         aviso(f.closest(".ficha-bloque").querySelector("h2").textContent.startsWith("Esperando") ? `${f.nombre.value} habilitado` : "Cambios guardados");
-        if (f.dataset.id === S.perfil.user_id) S.perfil = await S.api.perfil();
+        if (r?.sinTipo) aviso("Se guardó el permiso, pero para el tipo de usuario falta correr sql/parte14_tipo_usuario.sql en Neon.", true);
+        if (f.dataset.id === S.perfil.user_id) {
+          S.perfil = await S.api.perfil();
+          if (!conObras() || !S.perfil.iniciales_do) S.f.mias = false;
+          guardarDatos(); pintar(); pintarAjustes();
+        }
         abrirAdmin();
       } catch (e) { aviso(e.message, true); f.querySelectorAll("button").forEach((b) => (b.disabled = false)); }
     };
@@ -2007,6 +2043,156 @@ async function abrirAdmin() {
     };
   });
 }
+
+// ------------------------------------------------------------ mi director de obra (usuarios "con obras")
+// Se pregunta la primera vez que entra un usuario con obras que todavía no tiene D.O.;
+// también se puede cambiar desde Ajustes > Mi cuenta.
+function preguntarDO(desdeAjustes) {
+  document.querySelector(".modal-fondo")?.remove();
+  const actual = S.perfil?.iniciales_do || "";
+  const dirs = [...new Set([...todosLosDO(), ...(actual ? [actual] : [])])].sort((a, b) => a.localeCompare(b, "es"));
+  const fondo = document.createElement("div");
+  fondo.className = "modal-fondo";
+  fondo.innerHTML = `<form class="modal form" novalidate role="dialog" aria-modal="true" aria-labelledby="titulo-do">
+      <h2 id="titulo-do">¿Qué director de obra sos?</h2>
+      <p class="nota">Elegí cómo figurás en el campo D.O. de las obras. Al entrar vas a ver primero las tuyas (filtro «Mis obras»), y podés ver todas cuando quieras.</p>
+      <label>Director de obra<select name="ini">
+        <option value="">Elegí…</option>
+        ${dirs.map((d) => `<option ${d === actual ? "selected" : ""}>${esc(d)}</option>`).join("")}
+        <option value="__otro">No estoy en la lista (escribir)…</option></select></label>
+      <input name="otro" placeholder="Tus iniciales como van en D.O., ej. G.S." autocomplete="off" hidden>
+      <p class="error" hidden></p>
+      <div class="dos">
+        <button class="boton" type="button" data-luego>${desdeAjustes ? "Cancelar" : "Ahora no"}</button>
+        <button class="boton boton-primario" type="submit">Guardar</button>
+      </div>
+    </form>`;
+  document.body.append(fondo);
+  const f = fondo.querySelector("form"), err = f.querySelector(".error");
+  const cerrar = () => fondo.remove();
+  f.querySelector("[data-luego]").onclick = cerrar;
+  fondo.addEventListener("keydown", (ev) => { if (ev.key === "Escape") cerrar(); });
+  f.ini.onchange = () => { f.otro.hidden = f.ini.value !== "__otro"; if (!f.otro.hidden) f.otro.focus(); };
+  f.ini.focus();
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const ini = f.ini.value === "__otro" ? f.otro.value.trim() : f.ini.value;
+    if (!ini) { err.textContent = "Elegí tu nombre de la lista o escribí tus iniciales."; err.hidden = false; return; }
+    const b = f.querySelector("[type=submit]");
+    b.disabled = true; b.textContent = "Guardando…";
+    try {
+      await S.api.elegirMiDO(ini);
+      S.perfil = { ...S.perfil, iniciales_do: ini };
+      S.f.mias = true;
+      guardarDatos();
+      cerrar();
+      aviso(`Guardado (${ini}). Ahora ves tus obras`);
+      pintar();
+      if (UI.modo === "ajustes" && !UI.plegado) pintarAjustes();
+    } catch (e) {
+      err.textContent = e.message; err.hidden = false;
+      b.disabled = false; b.textContent = "Guardar";
+    }
+  };
+}
+
+// ------------------------------------------------------------ sugerencias propias (en lugar de <datalist>)
+// En Android la lista de un <datalist> sale como una tira arriba del teclado y casi no se ve.
+// Cada campo con lista muestra sus opciones en un desplegable propio debajo (o arriba) del campo.
+// En el campo D.O. se pueden poner varios directores separados con "/": se completa el último.
+const SG = { caja: null, campo: null, items: [], activa: -1 };
+function convertirListas(raiz) {
+  raiz.querySelectorAll?.("input[list]").forEach((i) => {
+    i.dataset.lista = i.getAttribute("list");
+    i.removeAttribute("list");
+    i.setAttribute("autocomplete", "off");
+  });
+}
+convertirListas(document);
+new MutationObserver((cambios) => {
+  for (const c of cambios) for (const n of c.addedNodes) if (n.nodeType === 1) convertirListas(n.matches("input[list]") ? n.parentNode : n);
+}).observe(document.body, { childList: true, subtree: true });
+
+const variosDO = (input) => input.name === "D.O.";
+function parteActual(input) {
+  const v = input.value;
+  if (!variosDO(input)) return { antes: "", texto: v };
+  const i = v.lastIndexOf("/");
+  return { antes: v.slice(0, i + 1), texto: v.slice(i + 1) };
+}
+function cerrarSugerencias() {
+  SG.caja?.remove();
+  SG.caja = null; SG.campo = null; SG.items = []; SG.activa = -1;
+}
+function mostrarSugerencias(input) {
+  const dl = document.getElementById(input.dataset.lista);
+  const todasOp = dl ? [...new Set([...dl.options].map((o) => o.value).filter(Boolean))] : [];
+  const t = clave(parteActual(input).texto);
+  const items = (t ? todasOp.filter((o) => clave(o).includes(t)) : todasOp).slice(0, 80);
+  // si lo escrito ya es exactamente la única opción, no hace falta mostrar nada
+  if (!items.length || (items.length === 1 && clave(items[0]) === t)) return cerrarSugerencias();
+  if (!SG.caja) {
+    SG.caja = document.createElement("ul");
+    SG.caja.className = "sugerencias";
+    SG.caja.setAttribute("role", "listbox");
+    // pointerdown: elige sin sacarle el foco al campo
+    SG.caja.addEventListener("pointerdown", (ev) => {
+      const li = ev.target.closest("li");
+      if (!li) return;
+      ev.preventDefault();
+      elegirSugerencia(Number(li.dataset.i));
+    });
+    document.body.append(SG.caja);
+  }
+  SG.campo = input; SG.items = items; SG.activa = -1;
+  SG.caja.innerHTML = items.map((o, i) => `<li role="option" data-i="${i}">${esc(o)}</li>`).join("");
+  ubicarSugerencias();
+}
+function ubicarSugerencias() {
+  if (!SG.caja || !SG.campo) return;
+  const r = SG.campo.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > innerHeight) return cerrarSugerencias();
+  const vv = window.visualViewport;
+  const alto = vv ? vv.height + vv.offsetTop : innerHeight; // el teclado del celular achica la parte visible
+  const abajo = alto - r.bottom - 8, arriba = r.top - 8;
+  const haciaArriba = abajo < 150 && arriba > abajo;
+  Object.assign(SG.caja.style, {
+    left: `${r.left}px`, width: `${r.width}px`,
+    top: haciaArriba ? "" : `${r.bottom + 2}px`,
+    bottom: haciaArriba ? `${innerHeight - r.top + 2}px` : "",
+    maxHeight: `${Math.max(110, Math.min(260, haciaArriba ? arriba : abajo))}px`,
+  });
+}
+function elegirSugerencia(i) {
+  const input = SG.campo, v = SG.items[i];
+  if (!input || v == null) return;
+  input.value = parteActual(input).antes + v;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  cerrarSugerencias();
+}
+document.addEventListener("focusin", (ev) => {
+  if (ev.target.matches?.("input[data-lista]")) mostrarSugerencias(ev.target);
+});
+document.addEventListener("input", (ev) => {
+  if (ev.target.matches?.("input[data-lista]") && ev.isTrusted) mostrarSugerencias(ev.target);
+});
+document.addEventListener("focusout", (ev) => {
+  if (ev.target === SG.campo) setTimeout(() => { if (document.activeElement !== SG.campo) cerrarSugerencias(); }, 120);
+});
+document.addEventListener("keydown", (ev) => {
+  if (!SG.caja || ev.target !== SG.campo) return;
+  if (ev.key === "Escape") { ev.stopPropagation(); return cerrarSugerencias(); }
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    ev.preventDefault();
+    SG.activa = (SG.activa + (ev.key === "ArrowDown" ? 1 : -1) + SG.items.length) % SG.items.length;
+    SG.caja.querySelectorAll("li").forEach((li, i) => li.classList.toggle("activa", i === SG.activa));
+    SG.caja.children[SG.activa]?.scrollIntoView({ block: "nearest" });
+  } else if (ev.key === "Enter" && SG.activa >= 0) { ev.preventDefault(); elegirSugerencia(SG.activa); }
+}, true);
+document.addEventListener("scroll", (ev) => { if (SG.caja && ev.target !== SG.caja) ubicarSugerencias(); }, true);
+window.visualViewport?.addEventListener("resize", ubicarSugerencias);
+window.addEventListener("resize", ubicarSugerencias);
 
 // ------------------------------------------------------------ instalar como app
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
