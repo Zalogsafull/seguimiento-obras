@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-4";
+import { crearApi } from "./api.js?v=2026-11-23-5";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1339,6 +1339,7 @@ function columnasExcel(tipo) {
   const cols = [["ID", (x) => x.o.id], ["Código", (x) => x.o.codigo], ["Etapa", (x) => CAT[x.cat].nombre],
     ["Situación", (x) => x.o.estado, tipo === "estructura" ? "ESTADO" : "Estado", "estado"]];
   for (const [col, k, etq, clase] of CAMPOS_EDITABLES[tipo]) {
+    if (clase === "url") continue; // los planos no van en el Excel
     cols.push([TITULO_CORTO[etq] || etq, (x) => (clase === "fecha" ? comoFecha(x.o[k]) : clase === "anio" && x.o[k] != null && x.o[k] !== "" ? Number(x.o[k]) : x.o[k] ?? null), col, clase, k]);
   }
   if (tipo === "estructura") cols.push(["Vence recepción", (x) => comoFecha(x.o.vence_recepcion)], ["Días a recepción", (x) => x.o.dias_para_recepcion ?? null]);
@@ -1424,7 +1425,6 @@ async function exportarExcel(id, filasTabla, boton) {
       ["Cómo usar este archivo"],
       ["1. Podés cambiar los valores de estas columnas:", editables.join(", ") || "(ninguna: esta capa no se edita desde la web)"],
       ["2. No cambies la columna ID: es la que identifica cada fila en la base."],
-      ["   En Planos la celda dice «abrir» y el enlace está detrás (Ctrl+clic para abrir la carpeta). Para cambiarlo, editá el hipervínculo o escribí el enlace nuevo en la celda."],
       ["3. Las demás columnas (Código, Etapa, vencimientos, hitos) son informativas: si las cambiás, no pasa nada."],
       ["4. Situación: PROY (proyecto), CONS (en obra) o FIN (terminada). Recepción: RP, RD, PD o PR."],
       ["5. Guardá el archivo y en la web andá a Tabla > Importar Excel. Antes de guardar te muestra la lista de cambios."],
