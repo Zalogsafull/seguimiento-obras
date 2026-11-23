@@ -494,9 +494,6 @@ body.con-tabla .mapa-zona { display: none; }
 .vertice-medio span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; box-sizing: border-box;
   background: rgba(30,30,30,.85); color: #6CC4D1; border: 1.5px dashed #6CC4D1; font: 700 13px/1 system-ui, sans-serif; cursor: copy; }
 /* exportar a DXF */
-.ctrl-dxf a { display: flex !important; align-items: center; justify-content: center; }
-.ctrl-dxf a span { font: 700 10.5px/1 system-ui, sans-serif; letter-spacing: .02em; }
-.ctrl-dxf[hidden] { display: none !important; }
 .dxf-capas { display: grid; gap: 2px; }
 .dxf-capas .check { margin: 2px 0 !important; }
 .dxf-capas input:disabled + * , .dxf-capas label:has(input:disabled) { opacity: .5; }

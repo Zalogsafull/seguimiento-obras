@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-12";
+import { crearApi } from "./api.js?v=2026-11-23-13";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1179,16 +1179,19 @@ function mostrarTabla(x, k, tipoCol) {
 function abrirTabla() {
   if (MED.activo) terminarMedida();
   $("#tabla").hidden = false;
+  S.verBotonDxf?.();
   document.body.classList.add("con-tabla");
   pintarTabla();
 }
 // En la computadora, «Ver en el mapa» deja el mapa a la izquierda y la Tabla más angosta a la derecha
 function tablaAlCostado(si) {
   document.body.classList.toggle("tabla-lado", si);
+  S.verBotonDxf?.();
   setTimeout(() => S.mapa.invalidateSize(), 60);
 }
 function cerrarTabla() {
   document.body.classList.remove("tabla-lado");
+  setTimeout(() => S.verBotonDxf?.(), 0);
   setTimeout(() => S.mapa && S.mapa.invalidateSize(), 60);
   $("#tabla").hidden = true;
   document.body.classList.remove("con-tabla");
@@ -4325,22 +4328,13 @@ function abrirDxf() {
     cerrar();
   };
 }
+// Botón DXF en la barra de arriba: aparece solo de cerca (1:20.000 o más), como antes
 function agregarBotonDxf() {
-  const Ctrl = L.Control.extend({
-    options: { position: "topright" },
-    onAdd() {
-      const div = L.DomUtil.create("div", "leaflet-bar ctrl-dxf");
-      const a = L.DomUtil.create("a", "", div);
-      a.href = "#"; a.role = "button"; a.title = "Exportar a DXF lo que se ve (coordenadas UTM 21 S)"; a.setAttribute("aria-label", a.title);
-      a.innerHTML = "<span>DXF</span>";
-      L.DomEvent.disableClickPropagation(div);
-      L.DomEvent.on(a, "click", (ev) => { L.DomEvent.preventDefault(ev); abrirDxf(); });
-      const ver = () => { div.hidden = S.mapa.getZoom() < ZOOM_DXF; };
-      S.mapa.on("zoomend", ver); ver();
-      return div;
-    },
-  });
-  new Ctrl().addTo(S.mapa);
+  const bt = $("#boton-dxf");
+  bt.onclick = abrirDxf;
+  const ver = () => { bt.hidden = S.mapa.getZoom() < ZOOM_DXF || !$("#tabla").hidden && !document.body.classList.contains("tabla-lado"); };
+  S.mapa.on("zoomend", ver); ver();
+  S.verBotonDxf = ver;
 }
 
 // Ver todo: aleja el mapa hasta que entra todo lo que está cargado y prendido
