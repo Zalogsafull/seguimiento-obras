@@ -503,3 +503,19 @@ body.con-tabla .mapa-zona { display: none; }
 /* filas elegidas en la Tabla, marcadas un rato en el mapa */
 .resalte { animation: latido 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .resalte { animation: none; } }
+
+/* Tabla: el ✕ siempre arriba a la derecha y en rojo; «Eliminar» siempre a la derecha */
+.tabla-barra { position: relative; padding-right: 60px; }
+.tabla-barra .cerrar { position: absolute; top: 10px; right: 14px; background: #B3261E; border-color: #B3261E; color: #fff; font-weight: 700; }
+.tabla-barra .cerrar:hover { background: #D33A2F; border-color: #D33A2F; }
+.tabla-barra .cerrar:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+#t-borrar { margin-left: auto; }
+@media (max-width: 760px) { .tabla-barra { padding-right: 54px; } .tabla-barra .cerrar { top: 8px; right: 10px; } }
+
+/* Computadora: mapa a la izquierda y Tabla más angosta a la derecha («Ver en el mapa») */
+@media (min-width: 761px) {
+  body.tabla-lado { --tabla-lado: clamp(520px, 56%, 1100px); }
+  body.con-tabla.tabla-lado .mapa-zona { display: block; width: calc(100% - var(--tabla-lado)); justify-self: start; }
+  body.tabla-lado .tabla-vista { width: var(--tabla-lado); justify-self: end; box-shadow: -6px 0 18px rgba(0,0,0,.35); }
+  body.tabla-lado .tabla-barra input[type=search] { width: 160px; }
+}

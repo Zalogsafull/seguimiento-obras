@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-11";
+import { crearApi } from "./api.js?v=2026-11-23-12";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -147,7 +147,7 @@ function guardarEstado() {
   try {
     localStorage.setItem(CLAVE_ESTADO, JSON.stringify({
       capaOn: S.capaOn, catOn: S.catOn, abiertoArbol: S.abiertoArbol, base: S.baseNombre, deptosOn: S.deptosOn,
-      callesGris: S.callesGris,
+      callesGris: S.callesGris, mias: !!S.f.mias,
     }));
   } catch (e) { /* sin almacenamiento: se usan los valores de siempre */ }
 }
@@ -445,7 +445,11 @@ function mostrarApp() {
   if (S.appLista) return;
   S.appLista = true;
   // quien tiene obras entra viendo las suyas (después puede apagar «Mis obras» en Filtros)
-  if (conObras() && S.perfil.iniciales_do) S.f.mias = true;
+  // quien tiene obras entra viendo las suyas la primera vez; después, como lo dejó
+  if (conObras() && S.perfil.iniciales_do) {
+    const g = leerJSON(CLAVE_ESTADO);
+    S.f.mias = typeof g?.mias === "boolean" ? g.mias : true;
+  }
   $("#mi-do").onclick = () => preguntarDO(true);
   $("#boton-nuevo").onclick = abrirNuevo;
   document.addEventListener("paste", alPegar);
@@ -1178,7 +1182,14 @@ function abrirTabla() {
   document.body.classList.add("con-tabla");
   pintarTabla();
 }
+// En la computadora, «Ver en el mapa» deja el mapa a la izquierda y la Tabla más angosta a la derecha
+function tablaAlCostado(si) {
+  document.body.classList.toggle("tabla-lado", si);
+  setTimeout(() => S.mapa.invalidateSize(), 60);
+}
 function cerrarTabla() {
+  document.body.classList.remove("tabla-lado");
+  setTimeout(() => S.mapa && S.mapa.invalidateSize(), 60);
   $("#tabla").hidden = true;
   document.body.classList.remove("con-tabla");
 }
@@ -1230,6 +1241,7 @@ function pintarTabla() {
       <button class="boton boton-chico" type="button" id="t-excel">Exportar Excel</button>`}
       ${puede ? `<button class="boton boton-chico" type="button" id="t-importar" title="Subir un Excel exportado desde acá, con datos cambiados">Importar Excel</button>
         <input type="file" id="t-archivo" accept=".xlsx,.xls" hidden>` : ""}
+      ${document.body.classList.contains("tabla-lado") ? `<button class="boton boton-chico solo-compu" type="button" id="t-ancha" title="La tabla vuelve a ocupar todo el ancho">Tabla completa</button>` : ""}
       <button class="cerrar" type="button" id="t-cerrar" aria-label="Cerrar la tabla" title="Cerrar la tabla">✕</button>
     </div>
     <div class="tabla-import" id="t-import" hidden></div>
@@ -1239,8 +1251,8 @@ function pintarTabla() {
       <span id="t-valor"></span>
       <button class="boton boton-primario boton-chico" type="submit">Aplicar</button>` : `<b>${nSel} elegida${nSel === 1 ? "" : "s"}</b>`}
       <button class="boton boton-chico" type="button" id="t-ver">Ver en el mapa</button>
-      ${editor() ? `<button class="boton boton-peligro boton-chico" type="button" id="t-borrar">${admin ? "Eliminar" : "Pedir eliminar"} ${nSel === 1 ? "la elegida" : `las ${nSel} elegidas`}</button>` : ""}
       <span class="t-progreso" id="t-progreso"></span>
+      ${editor() ? `<button class="boton boton-peligro boton-chico" type="button" id="t-borrar">${admin ? "Eliminar" : "Pedir eliminar"} ${nSel === 1 ? "la elegida" : `las ${nSel} elegidas`}</button>` : ""}
     </form>` : ""}
     <div class="tabla-scroll">
       <table class="tabla-datos">
@@ -1266,6 +1278,8 @@ function pintarTabla() {
   const sc = caja.querySelector(".tabla-scroll");
   sc.scrollTop = pos[0]; sc.scrollLeft = pos[1];
   $("#t-cerrar").onclick = cerrarTabla;
+  const ta = $("#t-ancha");
+  if (ta) ta.onclick = () => { tablaAlCostado(false); pintarTabla(); };
   $("#t-capa").onchange = (ev) => {
     T.capa = ev.target.value; T.sel.clear(); T.desc = false;
     T.orden = COLUMNAS_TABLA[CAPAS_LISTA.find((c) => c.id === T.capa).tipo][0][0];
@@ -1336,11 +1350,16 @@ function verElegidasEnMapa(tipo, filas) {
     }
   }
   if (!pts.length) return aviso("Las filas elegidas no tienen ubicación en el mapa.", true);
-  // que se vean aunque su capa estuviera apagada
+  // se respeta lo que tenés prendido: solo si alguna elegida no se ve, se prende su capa (nada más)
   const k = DATOS_DE_TIPO[tipo];
   if (k) S.capaOn[k] = true;
-  else CAPAS.filter((c) => c.tipo === tipo).forEach((c) => (S.capaOn[c.id] = true));
-  cerrarTabla();
+  else {
+    const vis = new Set((S.ultimosVisibles || []).filter((x) => x.tipo === tipo).map((x) => x.o.id));
+    const capa = CAPAS.find((c) => c.id === T.capa);
+    if (capa && filas.some((x) => !vis.has(x.o.id))) S.capaOn[capa.id] = true;
+  }
+  if (movil.matches) cerrarTabla();
+  else { tablaAlCostado(true); pintarTabla(); }
   S.mapa.invalidateSize();
   // las capas de agrimensura y relevamiento se ven de cerca: se acerca al menos hasta ahí
   const deCerca = k != null;
@@ -1355,7 +1374,7 @@ function verElegidasEnMapa(tipo, filas) {
   S.resalte = L.featureGroup(marcas).addTo(S.mapa);
   clearTimeout(S.resalteTimer);
   S.resalteTimer = setTimeout(() => { S.resalte?.remove(); S.resalte = null; }, 8000);
-  aviso(`${filas.length === 1 ? "La elegida está marcada" : `Las ${filas.length} elegidas están marcadas`} en celeste. Tocá Tabla para volver.`);
+  aviso(`${filas.length === 1 ? "La elegida está marcada" : `Las ${filas.length} elegidas están marcadas`} en celeste.${movil.matches ? " Tocá Tabla para volver." : ""}`);
 }
 
 // Eliminar varias filas de la Tabla: el administrador borra; un editor deja los pedidos
