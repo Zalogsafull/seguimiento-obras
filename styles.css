@@ -500,3 +500,6 @@ body.con-tabla .mapa-zona { display: none; }
 .dxf-capas { display: grid; gap: 2px; }
 .dxf-capas .check { margin: 2px 0 !important; }
 .dxf-capas input:disabled + * , .dxf-capas label:has(input:disabled) { opacity: .5; }
+/* filas elegidas en la Tabla, marcadas un rato en el mapa */
+.resalte { animation: latido 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .resalte { animation: none; } }

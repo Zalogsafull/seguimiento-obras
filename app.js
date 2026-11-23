@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-10";
+import { crearApi } from "./api.js?v=2026-11-23-11";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1214,7 +1214,7 @@ function pintarTabla() {
   const ids = new Set(xs.map((x) => x.o.id));
   for (const id of [...T.sel]) if (!ids.has(id)) T.sel.delete(id);
   const puede = editor() && conInformes(tipo);   // editar celdas y en masa
-  const elige = editor();                         // elegir filas (para editar o borrar)
+  const elige = true;                             // elegir filas (para ver en el mapa, editar o borrar)
   const editables = puede ? cols.filter(([k]) => columnaEditable(tipo, k)) : [];
   const admin = !!S.perfil?.admin, nSel = T.sel.size;
   const todosSel = xs.length && xs.every((x) => T.sel.has(x.o.id));
@@ -1238,7 +1238,8 @@ function pintarTabla() {
       <select name="campo" aria-label="Campo">${editables.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select>
       <span id="t-valor"></span>
       <button class="boton boton-primario boton-chico" type="submit">Aplicar</button>` : `<b>${nSel} elegida${nSel === 1 ? "" : "s"}</b>`}
-      <button class="boton boton-peligro boton-chico" type="button" id="t-borrar">${admin ? "Eliminar" : "Pedir eliminar"} ${nSel === 1 ? "la elegida" : `las ${nSel} elegidas`}</button>
+      <button class="boton boton-chico" type="button" id="t-ver">Ver en el mapa</button>
+      ${editor() ? `<button class="boton boton-peligro boton-chico" type="button" id="t-borrar">${admin ? "Eliminar" : "Pedir eliminar"} ${nSel === 1 ? "la elegida" : `las ${nSel} elegidas`}</button>` : ""}
       <span class="t-progreso" id="t-progreso"></span>
     </form>` : ""}
     <div class="tabla-scroll">
@@ -1259,8 +1260,8 @@ function pintarTabla() {
       </table>
       ${xs.length ? "" : `<p class="nota" style="padding:16px">No hay filas${T.texto ? " con esa búsqueda" : ""}.</p>`}
     </div>
-    <p class="tabla-ayuda nota">${puede ? "Doble clic en una celda con fondo claro para editarla. Doble clic en el código abre la ficha. Elegí filas para cambiar un campo en todas juntas o para eliminarlas."
-      : elige ? "Doble clic en una fila abre la ficha. Elegí filas para eliminarlas." : "Doble clic en una fila abre la ficha."}</p>`;
+    <p class="tabla-ayuda nota">${puede ? "Doble clic en una celda con fondo claro para editarla. Doble clic en el código abre la ficha. Elegí filas para cambiar un campo en todas juntas, verlas en el mapa o eliminarlas."
+      : editor() ? "Doble clic en una fila abre la ficha. Elegí filas para verlas en el mapa o eliminarlas." : "Doble clic en una fila abre la ficha. Elegí filas para verlas en el mapa."}</p>`;
 
   const sc = caja.querySelector(".tabla-scroll");
   sc.scrollTop = pos[0]; sc.scrollLeft = pos[1];
@@ -1318,6 +1319,43 @@ function pintarTabla() {
   } else if (m) m.onsubmit = (ev) => ev.preventDefault();
   const tb = $("#t-borrar");
   if (tb) tb.onclick = () => borrarElegidas(tipo, xs.filter((x) => T.sel.has(x.o.id)));
+  const tv = $("#t-ver");
+  if (tv) tv.onclick = () => verElegidasEnMapa(tipo, xs.filter((x) => T.sel.has(x.o.id)));
+}
+
+// Cierra la Tabla, acerca el mapa a las filas elegidas y las marca un rato en celeste
+function verElegidasEnMapa(tipo, filas) {
+  const marcas = [], pts = [];
+  for (const x of filas) {
+    const ll = x.o.geojson ? anillosDe(x.o) : null;
+    if (ll) {
+      for (const pol of ll) { marcas.push(L.polygon(pol, { color: "#6CC4D1", weight: 4, fill: false, interactive: false })); pts.push(...pol.flat()); }
+    } else if (x.o.lat != null && x.o.lon != null) {
+      marcas.push(L.circleMarker([x.o.lat, x.o.lon], { radius: 16, color: "#6CC4D1", weight: 3, fill: false, interactive: false, className: "resalte" }));
+      pts.push([x.o.lat, x.o.lon]);
+    }
+  }
+  if (!pts.length) return aviso("Las filas elegidas no tienen ubicación en el mapa.", true);
+  // que se vean aunque su capa estuviera apagada
+  const k = DATOS_DE_TIPO[tipo];
+  if (k) S.capaOn[k] = true;
+  else CAPAS.filter((c) => c.tipo === tipo).forEach((c) => (S.capaOn[c.id] = true));
+  cerrarTabla();
+  S.mapa.invalidateSize();
+  // las capas de agrimensura y relevamiento se ven de cerca: se acerca al menos hasta ahí
+  const deCerca = k != null;
+  const b = L.latLngBounds(pts);
+  if (pts.length === 1 || b.getNorthEast().equals(b.getSouthWest())) S.mapa.setView(b.getCenter(), Math.max(S.mapa.getZoom(), 17));
+  else {
+    S.mapa.fitBounds(b, { padding: [50, 50], maxZoom: 18 });
+    if (deCerca && S.mapa.getZoom() < ZOOM_AGRI) S.mapa.setView(b.getCenter(), ZOOM_AGRI);
+  }
+  pintar(false);
+  S.resalte?.remove();
+  S.resalte = L.featureGroup(marcas).addTo(S.mapa);
+  clearTimeout(S.resalteTimer);
+  S.resalteTimer = setTimeout(() => { S.resalte?.remove(); S.resalte = null; }, 8000);
+  aviso(`${filas.length === 1 ? "La elegida está marcada" : `Las ${filas.length} elegidas están marcadas`} en celeste. Tocá Tabla para volver.`);
 }
 
 // Eliminar varias filas de la Tabla: el administrador borra; un editor deja los pedidos
