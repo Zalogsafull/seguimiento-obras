@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-8";
+import { crearApi } from "./api.js?v=2026-11-23-9";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -936,7 +936,12 @@ const CAPAS_LISTA = [
   { id: "term_e", nombre: "Estructuras OICI (terminadas)", tipo: "estructura" },
   { id: "obras", nombre: "Obras", tipo: "obra" },
   { id: "relev", nombre: "Relevamiento", tipo: "relevamiento" },
+  { id: "amoj", nombre: "Amojonamiento", tipo: "amojonamiento" },
+  { id: "tri", nombre: "Triángulos", tipo: "triangulo" },
+  { id: "padr", nombre: "Padrones", tipo: "padron" },
 ];
+// los informes en PDF y Excel son solo de estructuras y obras
+const conInformes = (tipo) => tipo === "estructura" || tipo === "obra";
 const ORDEN_CAT = ["infra", "montaje", "hormigonado", "aprobado_e", "aprobado_o", "proyecto", "vencida", "r3", "r6", "plazo", "sinfecha", "sinrecep", "provisoria", "recibida", "terminada"];
 const porCodigo = (a, b) => String(a.o.codigo ?? "").localeCompare(String(b.o.codigo ?? ""), "es", { numeric: true });
 
@@ -944,6 +949,10 @@ const porCodigo = (a, b) => String(a.o.codigo ?? "").localeCompare(String(b.o.co
 function filasDeCapa(id, respetar) {
   if (id === "relev") {
     return (respetar ? relevFiltrados() : S.datos.relev).map((o) => ({ tipo: "relevamiento", o, cat: null }));
+  }
+  if (id === "amoj" || id === "tri" || id === "padr") {
+    if (respetar && !S.capaOn[id]) return [];
+    return (S.datos[id] || []).map((o) => ({ tipo: TIPO_DE_FICHA[id], o, cat: null }));
   }
   const lista = id === "est_todas" ? unicos(todas()) : todas();
   return lista.filter((x) => {
@@ -1127,6 +1136,9 @@ const COLUMNAS_TABLA = {
     ["departamento", "Departamento"], ["licitacion", "Licitación"], ["tarea", "Tarea"], ["descripcion", "Tipo"], ["director_obra", "D.O."],
     ["fin_previsto", "Fin previsto", "fecha"], ["hitos", "Hitos hechos"], ["planos", "Planos"]],
   relevamiento: [["codigo", "Código"], ["descripcion", "Descripción"], ["lat", "Latitud", "num"], ["lon", "Longitud", "num"], ["z", "Z (m)", "num"]],
+  amojonamiento: [["codigo", "Código"], ["descripcion", "Descripción"], ["lat", "Latitud", "num"], ["lon", "Longitud", "num"]],
+  triangulo: [["codigo", "Código"], ["area", "Área (m²)", "num"], ["vertices", "Vértices", "num"]],
+  padron: [["padron", "Padrón"], ["area", "Área (m²)", "num"], ["vertices", "Vértices", "num"]],
 };
 const SITUACIONES = [["PROY", "Proyecto"], ["CONS", "En obra"], ["FIN", "Terminada"]];
 // columna editable de la capa para cada campo de la web
@@ -1135,13 +1147,19 @@ function columnaEditable(tipo, k) {
   const c = (CAMPOS_EDITABLES[tipo] || []).find((x) => x[1] === k);
   return c ? [c[0], c[3]] : null;
 }
-const T = { capa: "est_todas", texto: "", respetar: false, orden: "codigo", desc: false, sel: new Set() };
+const T = { capa: "obra_e", texto: "", respetar: false, orden: "codigo", desc: false, sel: new Set() };
 
 function valorTabla(x, k) {
   const o = x.o;
   if (k === "etapa_nombre") return x.cat ? CAT[x.cat].nombre : "";
   if (k === "hitos") return o.hitos_total ? `${o.hitos_hechos ?? 0} de ${o.hitos_total}` : "";
   if (k === "estado") return (SITUACIONES.find((s) => s[0] === o.estado) || [, o.estado ?? ""])[1];
+  if (k === "area" || k === "vertices") {
+    const ll = anillosDe(o);
+    if (!ll) return "";
+    const v = ll[0][0].slice(0, -1).map(([lat, lon]) => ({ lat, lon }));
+    return k === "vertices" ? v.length : Math.round(o.area_m2 != null ? Number(o.area_m2) : medidasDe(v).area);
+  }
   return o[k] ?? "";
 }
 function mostrarTabla(x, k, tipoCol) {
@@ -1149,6 +1167,7 @@ function mostrarTabla(x, k, tipoCol) {
   if (v === "" || v == null) return "";
   if (tipoCol === "fecha") return fecha(String(v).slice(0, 10));
   if (k === "lat" || k === "lon") return Number(v).toFixed(6);
+  if (k === "area") return numero(v, 0);
   if (k === "planos") return `<a href="${esc(v)}" target="_blank" rel="noopener">abrir</a>`;
   return esc(v);
 }
@@ -1194,8 +1213,10 @@ function pintarTabla() {
   const { xs, tipo, cols } = filasTabla();
   const ids = new Set(xs.map((x) => x.o.id));
   for (const id of [...T.sel]) if (!ids.has(id)) T.sel.delete(id);
-  const puede = editor() && tipo !== "relevamiento";
+  const puede = editor() && conInformes(tipo);   // editar celdas y en masa
+  const elige = editor();                         // elegir filas (para editar o borrar)
   const editables = puede ? cols.filter(([k]) => columnaEditable(tipo, k)) : [];
+  const admin = !!S.perfil?.admin, nSel = T.sel.size;
   const todosSel = xs.length && xs.every((x) => T.sel.has(x.o.id));
   const flecha = (k) => (T.orden === k ? (T.desc ? " ▾" : " ▴") : "");
   caja.innerHTML = `
@@ -1205,43 +1226,50 @@ function pintarTabla() {
       <input id="t-buscar" type="search" placeholder="Buscar en la tabla" value="${esc(T.texto)}" aria-label="Buscar">
       <label class="t-check"><input type="checkbox" id="t-respetar" ${T.respetar ? "checked" : ""}> Respetar filtros y categorías</label>
       <span class="t-cuenta">${xs.length} fila${xs.length === 1 ? "" : "s"}${T.sel.size ? ` · ${T.sel.size} elegida${T.sel.size === 1 ? "" : "s"}` : ""}</span>
-      ${tipo === "relevamiento" ? "" : `<button class="boton boton-chico" type="button" id="t-pdf" title="PDF A4 de las filas de la tabla, listo para imprimir">Exportar PDF</button>
+      ${!conInformes(tipo) ? "" : `<button class="boton boton-chico" type="button" id="t-pdf" title="PDF A4 de las filas de la tabla, listo para imprimir">Exportar PDF</button>
       <button class="boton boton-chico" type="button" id="t-excel">Exportar Excel</button>`}
       ${puede ? `<button class="boton boton-chico" type="button" id="t-importar" title="Subir un Excel exportado desde acá, con datos cambiados">Importar Excel</button>
         <input type="file" id="t-archivo" accept=".xlsx,.xls" hidden>` : ""}
       <button class="cerrar" type="button" id="t-cerrar" aria-label="Cerrar la tabla" title="Cerrar la tabla">✕</button>
     </div>
     <div class="tabla-import" id="t-import" hidden></div>
-    ${puede ? `<form class="tabla-masivo" id="t-masivo" ${T.sel.size ? "" : "hidden"}>
-      <b>Cambiar en ${T.sel.size} elegida${T.sel.size === 1 ? "" : "s"}:</b>
+    ${elige ? `<form class="tabla-masivo" id="t-masivo" ${nSel ? "" : "hidden"}>
+      ${puede ? `<b>Cambiar en ${nSel} elegida${nSel === 1 ? "" : "s"}:</b>
       <select name="campo" aria-label="Campo">${editables.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select>
       <span id="t-valor"></span>
-      <button class="boton boton-primario boton-chico" type="submit">Aplicar</button>
+      <button class="boton boton-primario boton-chico" type="submit">Aplicar</button>` : `<b>${nSel} elegida${nSel === 1 ? "" : "s"}</b>`}
+      <button class="boton boton-peligro boton-chico" type="button" id="t-borrar">${admin ? "Eliminar" : "Pedir eliminar"} ${nSel === 1 ? "la elegida" : `las ${nSel} elegidas`}</button>
       <span class="t-progreso" id="t-progreso"></span>
     </form>` : ""}
     <div class="tabla-scroll">
       <table class="tabla-datos">
         <thead><tr>
-          ${puede ? `<th class="t-sel"><input type="checkbox" id="t-todos" ${todosSel ? "checked" : ""} aria-label="Elegir todas"></th>` : ""}
+          ${elige ? `<th class="t-sel"><input type="checkbox" id="t-todos" ${todosSel ? "checked" : ""} aria-label="Elegir todas"></th>` : ""}
           <th class="t-sim"></th>
           ${cols.map(([k, n]) => `<th data-orden="${k}" class="${columnaEditable(tipo, k) && puede ? "editable" : ""}">${n}${flecha(k)}</th>`).join("")}
         </tr></thead>
         <tbody>
           ${xs.map((x) => `<tr data-id="${x.o.id}" class="${T.sel.has(x.o.id) ? "elegida" : ""}">
-            ${puede ? `<td class="t-sel"><input type="checkbox" ${T.sel.has(x.o.id) ? "checked" : ""} aria-label="Elegir ${esc(x.o.codigo)}"></td>` : ""}
-            <td class="t-sim">${x.cat ? simbolo(x.tipo, x.o, x.cat, 0.8) : svgRelev(9)}</td>
+            ${elige ? `<td class="t-sel"><input type="checkbox" ${T.sel.has(x.o.id) ? "checked" : ""} aria-label="Elegir ${esc(x.o.codigo ?? x.o.padron ?? "")}"></td>` : ""}
+            <td class="t-sim">${x.cat ? simbolo(x.tipo, x.o, x.cat, 0.8) : x.tipo === "amojonamiento" ? svgMojon(10)
+              : x.tipo === "triangulo" ? svgTri(normal(x.o.codigo) === "DC") : x.tipo === "padron" ? svgPadron() : svgRelev(9)}</td>
             ${cols.map(([k, , tc]) => `<td data-k="${k}" class="${columnaEditable(tipo, k) && puede ? "editable" : ""}${tc === "num" ? " num" : ""}">${mostrarTabla(x, k, tc)}</td>`).join("")}
           </tr>`).join("")}
         </tbody>
       </table>
       ${xs.length ? "" : `<p class="nota" style="padding:16px">No hay filas${T.texto ? " con esa búsqueda" : ""}.</p>`}
     </div>
-    <p class="tabla-ayuda nota">${puede ? "Doble clic en una celda con fondo claro para editarla. Doble clic en el código abre la ficha. Elegí filas para cambiar un campo en todas juntas." : "Doble clic en una fila abre la ficha."}</p>`;
+    <p class="tabla-ayuda nota">${puede ? "Doble clic en una celda con fondo claro para editarla. Doble clic en el código abre la ficha. Elegí filas para cambiar un campo en todas juntas o para eliminarlas."
+      : elige ? "Doble clic en una fila abre la ficha. Elegí filas para eliminarlas." : "Doble clic en una fila abre la ficha."}</p>`;
 
   const sc = caja.querySelector(".tabla-scroll");
   sc.scrollTop = pos[0]; sc.scrollLeft = pos[1];
   $("#t-cerrar").onclick = cerrarTabla;
-  $("#t-capa").onchange = (ev) => { T.capa = ev.target.value; T.sel.clear(); T.orden = "codigo"; T.desc = false; pintarTabla(); };
+  $("#t-capa").onchange = (ev) => {
+    T.capa = ev.target.value; T.sel.clear(); T.desc = false;
+    T.orden = COLUMNAS_TABLA[CAPAS_LISTA.find((c) => c.id === T.capa).tipo][0][0];
+    pintarTabla();
+  };
   const b = $("#t-buscar");
   b.oninput = () => { T.texto = b.value; clearTimeout(T.timer); T.timer = setTimeout(() => { pintarTabla(); const nb = $("#t-buscar"); nb.focus(); nb.setSelectionRange(nb.value.length, nb.value.length); }, 250); };
   $("#t-respetar").onchange = (ev) => {
@@ -1279,15 +1307,52 @@ function pintarTabla() {
     const id = Number(tr.dataset.id), k = td.dataset.k;
     const x = xs.find((z) => z.o.id === id);
     if (td.classList.contains("editable") && k !== "codigo") return editarCelda(td, x, k, tipo);
-    if (tipo === "relevamiento") abrirRelev(id); else abrirFicha(tipo, id);
+    abrirElemento(tipo, id);
   };
   const m = $("#t-masivo");
-  if (m) {
+  if (m && m.campo) {
     const ponerValor = () => { $("#t-valor").innerHTML = controlValor(tipo, m.campo.value, ""); };
     m.campo.onchange = ponerValor;
     ponerValor();
     m.onsubmit = (ev) => { ev.preventDefault(); aplicarMasivo(tipo, m.campo.value, leerControl($("#t-valor")), [...T.sel]); };
+  } else if (m) m.onsubmit = (ev) => ev.preventDefault();
+  const tb = $("#t-borrar");
+  if (tb) tb.onclick = () => borrarElegidas(tipo, xs.filter((x) => T.sel.has(x.o.id)));
+}
+
+// Eliminar varias filas de la Tabla: el administrador borra; un editor deja los pedidos
+async function borrarElegidas(tipo, filas) {
+  if (!filas.length) return;
+  const admin = !!S.perfil?.admin, n = filas.length;
+  const nombres = filas.slice(0, 6).map((x) => nombreBorrar(tipo, x.o)).join(", ") + (n > 6 ? ` y ${n - 6} más` : "");
+  let motivo = null;
+  if (admin) {
+    if (!confirm(`¿Eliminar ${n === 1 ? "1 elemento" : `${n} elementos`} de ${CAPAS_LISTA.find((c) => c.id === T.capa).nombre}?\n${nombres}\n\nSe borran para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base.`)) return;
+  } else {
+    motivo = prompt(`Vas a pedir que se eliminen ${n === 1 ? "1 elemento" : `${n} elementos`}: ${nombres}.\n¿Por qué? (lo ve el administrador)`, "");
+    if (motivo === null) return;
   }
+  const prog = $("#t-progreso"), b = $("#t-borrar");
+  if (b) b.disabled = true;
+  const r = { BORRADO: 0, PEDIDO: 0, YA_PEDIDO: 0 }, fallas = [];
+  for (const [i, x] of filas.entries()) {
+    if (prog) prog.textContent = `${i + 1} de ${n}…`;
+    try { const res = await S.api.pedirBorrado(tipo, x.o.id, motivo || null); r[res] = (r[res] || 0) + 1; }
+    catch (e) {
+      fallas.push(`${nombreBorrar(tipo, x.o)}: ${e.message}`);
+      if (/parte9|parte16|permiso|editor|failed to fetch|networkerror/i.test(e.message)) break;
+    }
+  }
+  const partes = [];
+  if (r.BORRADO) partes.push(`${r.BORRADO} eliminado${r.BORRADO === 1 ? "" : "s"}`);
+  if (r.PEDIDO) partes.push(`${r.PEDIDO} pedido${r.PEDIDO === 1 ? "" : "s"} enviado${r.PEDIDO === 1 ? "" : "s"} al administrador`);
+  if (r.YA_PEDIDO) partes.push(`${r.YA_PEDIDO} ya estaba${r.YA_PEDIDO === 1 ? "" : "n"} pedido${r.YA_PEDIDO === 1 ? "" : "s"}`);
+  if (partes.length) aviso(partes.join(" · "));
+  if (fallas.length) aviso(`No se pudieron eliminar ${fallas.length}: ${fallas.slice(0, 3).join(" · ")}`, true);
+  T.sel.clear();
+  await cargar();
+  await cargarSolicitudes();
+  pintarTabla();
 }
 
 // Control para escribir un valor según el tipo de campo
@@ -1777,6 +1842,7 @@ function prepararMapa() {
   agregarBotonesPaneles();
   L.control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(S.mapa);
   agregarBotonUbicacion();
+  agregarBotonVerTodo();
   agregarBotonMedir();
   leerEstado();
   const vista = leerJSON(CLAVE_VISTA);
@@ -1794,6 +1860,7 @@ function prepararMapa() {
     maxZoom: 21, maxNativeZoom: 18, attribution: "Imágenes © Esri", crossOrigin: "anonymous" });
   if (!S.base[S.baseNombre]) S.baseNombre = "Gris (como QGIS)";
   agregarBotonBase();
+  agregarBotonDxf();
   S.base[S.baseNombre].addTo(S.mapa);
   $("#mapa").classList.toggle("fondo-oscuro", S.baseNombre.startsWith("Gris"));
   // Departamentos va de fondo: su panel queda debajo de los símbolos (que van en markerPane, 600).
@@ -1840,6 +1907,7 @@ function icono(tipo, o, cat) {
 }
 
 function pintarMapa(v) {
+  S.ultimosVisibles = v;
   for (const m of S.marcadores.values()) m.remove();
   S.marcadores.clear();
   const puntos = [];
@@ -2415,7 +2483,7 @@ function agregarBotonesPaneles() {
     options: { position: "topleft" },
     onAdd() {
       const div = L.DomUtil.create("div", "leaflet-bar ctrl-paneles");
-      for (const [modo, titulo] of [["capas", "Capas de obra"], ["filtros", "Filtros"], ["lista", "Lista de lo que se ve en el mapa"], ["utilidad", "Capas de utilidad: relevamiento y departamentos"], ["referencias", "Referencias: qué quiere decir cada símbolo"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"]]) {
+      for (const [modo, titulo] of [["capas", "Capas de obra"], ["utilidad", "Capas de utilidad: relevamiento, amojonamiento, triángulos, padrones y departamentos"], ["filtros", "Filtros"], ["lista", "Lista de lo que se ve en el mapa"], ["referencias", "Referencias: qué quiere decir cada símbolo"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"]]) {
         const a = L.DomUtil.create("a", "", div);
         a.href = "#"; a.role = "button"; a.dataset.modo = modo; a.title = titulo; a.setAttribute("aria-label", titulo);
         a.innerHTML = ICONOS[modo];
@@ -4036,6 +4104,215 @@ const metros = (m) => (m < 1000
   : `${(m / 1000).toLocaleString("es-UY", { maximumFractionDigits: m < 10000 ? 3 : 2 })} km`);
 
 const ICONO_REGLA = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3.2 15.6 15.6 3.2l5.2 5.2L8.4 20.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 11.8l1.8 1.8M9.6 9.2l2.6 2.6M12.2 6.6l1.8 1.8M14.8 4l2.6 2.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+
+// ------------------------------------------------------------ exportar a DXF (como Proyecto > Importar/Exportar > DXF en QGIS)
+// De cerca (desde 1:20.000) se puede bajar lo que se ve en pantalla, en SIRGAS 2000 / UTM 21 S
+// (EPSG 31981, en metros, las mismas coordenadas que QGIS), una capa de CAD por capa del mapa.
+function gradosAUtm(lat, lon, zona = 21) {
+  const a = 6378137, f = 1 / 298.257222101, k0 = 0.9996, e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+  const p = lat * Math.PI / 180, l = lon * Math.PI / 180, l0 = (zona * 6 - 183) * Math.PI / 180;
+  const s = Math.sin(p), c = Math.cos(p), t = Math.tan(p);
+  const N = a / Math.sqrt(1 - e2 * s * s), T = t * t, C = ep2 * c * c, A = c * (l - l0);
+  const M = a * ((1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256) * p - (3 * e2 / 8 + 3 * e2 ** 2 / 32 + 45 * e2 ** 3 / 1024) * Math.sin(2 * p)
+    + (15 * e2 ** 2 / 256 + 45 * e2 ** 3 / 1024) * Math.sin(4 * p) - (35 * e2 ** 3 / 3072) * Math.sin(6 * p));
+  const x = k0 * N * (A + (1 - T + C) * A ** 3 / 6 + (5 - 18 * T + T * T + 72 * C - 58 * ep2) * A ** 5 / 120) + 500000;
+  const y = k0 * (M + N * t * (A * A / 2 + (5 - T + 9 * C + 4 * C * C) * A ** 4 / 24 + (61 - 58 * T + T * T + 600 * C - 330 * ep2) * A ** 6 / 720)) + 10000000;
+  return [x, y];
+}
+const ZOOM_DXF = ZOOM_RELEV; // 1:20.000 o más cerca
+// capas de CAD: nombre, color (índice de AutoCAD) y qué juntar de lo que se ve
+const DXF_CAPAS = [
+  { id: "estructuras", nombre: "ESTRUCTURAS", color: 1, titulo: "Estructuras" },
+  { id: "obras", nombre: "OBRAS", color: 4, titulo: "Obras" },
+  { id: "relev", nombre: "RELEVAMIENTO", color: 7, titulo: "Relevamiento (con su Z)" },
+  { id: "amoj", nombre: "AMOJONAMIENTO", color: 1, titulo: "Amojonamiento" },
+  { id: "tri", nombre: "TRIANGULOS", color: 3, titulo: "Triángulos" },
+  { id: "padr", nombre: "PADRONES", color: 7, titulo: "Padrones" },
+];
+
+// Lo que se ve en la pantalla, por capa
+function elementosEnVista() {
+  const b = S.mapa.getBounds().pad(0.02);
+  const dentro = (lat, lon) => lat != null && b.contains([lat, lon]);
+  const vis = S.ultimosVisibles || [];
+  const r = {
+    estructuras: vis.filter((x) => x.tipo === "estructura" && dentro(x.o.lat, x.o.lon)).map((x) => x.o),
+    obras: vis.filter((x) => x.tipo === "obra" && dentro(x.o.lat, x.o.lon)).map((x) => x.o),
+    relev: S.datos.relev.filter((o) => dentro(o.lat, o.lon)),
+    amoj: S.datos.amoj.filter((o) => dentro(o.lat, o.lon)),
+    tri: S.datos.tri.filter((o) => { const ll = anillosDe(o); return ll && b.intersects(L.latLngBounds(ll.flat(2))); }),
+    padr: S.datos.padr.filter((o) => { const ll = anillosDe(o); return ll && b.intersects(L.latLngBounds(ll.flat(2))); }),
+  };
+  // sin repetir la misma estructura (puede estar en dos capas del árbol)
+  r.estructuras = [...new Map(r.estructuras.map((o) => [o.id, o])).values()];
+  return r;
+}
+const prendidaEnMapa = (id) => (id === "estructuras" ? CAPAS.some((c) => c.tipo === "estructura" && S.capaOn[c.id])
+  : id === "obras" ? !!S.capaOn.obras : !!S.capaOn[id]);
+
+function armarDxf(sel, alturaTexto) {
+  const out = [];
+  const g = (codigo, valor) => out.push(String(codigo), String(valor));
+  const n = (v) => (Math.round(v * 1000) / 1000).toFixed(3);
+  const capas = DXF_CAPAS.filter((c) => sel[c.id]?.length);
+  const nombresCapa = capas.flatMap((c) => [c.nombre, c.nombre + "_TEXTO"]);
+  let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+  const ent = [];
+  const e = (...pares) => ent.push(pares);
+  const caja = ([x, y]) => { xmin = Math.min(xmin, x); ymin = Math.min(ymin, y); xmax = Math.max(xmax, x); ymax = Math.max(ymax, y); };
+  const punto = (capa, lat, lon, z = 0) => { const p = gradosAUtm(lat, lon); caja(p); e([0, "POINT"], [8, capa], [10, n(p[0])], [20, n(p[1])], [30, n(z)]); return p; };
+  const texto = (capa, p, t, dx = 0) => {
+    if (t == null || t === "") return;
+    e([0, "TEXT"], [8, capa + "_TEXTO"], [10, n(p[0] + dx)], [20, n(p[1])], [30, "0.000"], [40, n(alturaTexto)], [1, String(t)]);
+  };
+  const poligono = (capa, anillo) => {
+    const pts = anillo.map(([lat, lon]) => gradosAUtm(lat, lon));
+    if (pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop();
+    pts.forEach(caja);
+    e([0, "POLYLINE"], [8, capa], [66, 1], [10, "0.000"], [20, "0.000"], [30, "0.000"], [70, 1]);
+    for (const p of pts) e([0, "VERTEX"], [8, capa], [10, n(p[0])], [20, n(p[1])], [30, "0.000"]);
+    e([0, "SEQEND"], [8, capa]);
+    return pts;
+  };
+  const centro = (pts) => [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length];
+  for (const o of sel.estructuras || []) texto("ESTRUCTURAS", punto("ESTRUCTURAS", o.lat, o.lon), o.codigo, alturaTexto * 0.6);
+  for (const o of sel.obras || []) texto("OBRAS", punto("OBRAS", o.lat, o.lon), o.codigo, alturaTexto * 0.6);
+  for (const o of sel.relev || []) {
+    const z = o.z == null || o.z === "" ? 0 : Number(o.z);
+    texto("RELEVAMIENTO", punto("RELEVAMIENTO", o.lat, o.lon, isNaN(z) ? 0 : z), o.codigo, alturaTexto * 0.6);
+  }
+  for (const o of sel.amoj || []) texto("AMOJONAMIENTO", punto("AMOJONAMIENTO", o.lat, o.lon), o.codigo, alturaTexto * 0.6);
+  for (const o of sel.tri || []) for (const pol of anillosDe(o)) { const pts = poligono("TRIANGULOS", pol[0]); texto("TRIANGULOS", centro(pts), o.codigo); }
+  for (const o of sel.padr || []) for (const pol of anillosDe(o)) { const pts = poligono("PADRONES", pol[0]); texto("PADRONES", centro(pts), o.padron); }
+
+  // DXF R12 (AC1009): lo abren AutoCAD, QGIS, LibreCAD y casi cualquier programa de CAD
+  g(0, "SECTION"); g(2, "HEADER");
+  g(9, "$ACADVER"); g(1, "AC1009");
+  g(9, "$DWGCODEPAGE"); g(3, "ANSI_1252");
+  g(9, "$INSBASE"); g(10, "0.0"); g(20, "0.0"); g(30, "0.0");
+  g(9, "$EXTMIN"); g(10, n(xmin)); g(20, n(ymin)); g(30, "0.0");
+  g(9, "$EXTMAX"); g(10, n(xmax)); g(20, n(ymax)); g(30, "0.0");
+  g(0, "ENDSEC");
+  g(0, "SECTION"); g(2, "TABLES");
+  g(0, "TABLE"); g(2, "LTYPE"); g(70, 1);
+  g(0, "LTYPE"); g(2, "CONTINUOUS"); g(70, 0); g(3, "Solid line"); g(72, 65); g(73, 0); g(40, "0.0");
+  g(0, "ENDTAB");
+  g(0, "TABLE"); g(2, "LAYER"); g(70, nombresCapa.length + 1);
+  g(0, "LAYER"); g(2, "0"); g(70, 0); g(62, 7); g(6, "CONTINUOUS");
+  for (const c of capas) for (const nom of [c.nombre, c.nombre + "_TEXTO"]) { g(0, "LAYER"); g(2, nom); g(70, 0); g(62, c.color); g(6, "CONTINUOUS"); }
+  g(0, "ENDTAB");
+  g(0, "TABLE"); g(2, "STYLE"); g(70, 1);
+  g(0, "STYLE"); g(2, "STANDARD"); g(70, 0); g(40, "0.0"); g(41, "1.0"); g(50, "0.0"); g(71, 0); g(42, n(alturaTexto)); g(3, "txt"); g(4, "");
+  g(0, "ENDTAB");
+  g(0, "ENDSEC");
+  g(0, "SECTION"); g(2, "ENTITIES");
+  for (const pares of ent) for (const [c, v] of pares) g(c, v);
+  g(0, "ENDSEC"); g(0, "EOF");
+  return out.join("\r\n") + "\r\n";
+}
+// El DXF R12 va en Windows-1252 (tildes y eñes bien en AutoCAD); lo que no entra, con "?"
+function aWindows1252(txt) {
+  const extra = { "€": 0x80, "‚": 0x82, "ƒ": 0x83, "„": 0x84, "…": 0x85, "†": 0x86, "‡": 0x87, "ˆ": 0x88, "‰": 0x89, "Š": 0x8a, "‹": 0x8b, "Œ": 0x8c,
+    "Ž": 0x8e, "‘": 0x91, "’": 0x92, "“": 0x93, "”": 0x94, "•": 0x95, "–": 0x96, "—": 0x97, "˜": 0x98, "™": 0x99, "š": 0x9a, "›": 0x9b, "œ": 0x9c, "ž": 0x9e, "Ÿ": 0x9f };
+  const b = new Uint8Array(txt.length);
+  for (let i = 0; i < txt.length; i++) {
+    const ch = txt[i], c = txt.charCodeAt(i);
+    b[i] = c < 0x80 || (c >= 0xa0 && c <= 0xff) ? c : extra[ch] ?? 0x3f;
+  }
+  return b;
+}
+
+function abrirDxf() {
+  if (S.mapa.getZoom() < ZOOM_DXF) return aviso("Acercate en el mapa (1:20.000 o más cerca) para exportar a DXF.", true);
+  document.querySelector(".modal-fondo")?.remove();
+  const ev = elementosEnVista();
+  const escala = Math.round(S.mapa.distance(S.mapa.containerPointToLatLng([0, 0]), S.mapa.containerPointToLatLng([100, 0])) / 100 / 0.000265);
+  const filas = DXF_CAPAS.map((c) => `<label class="check"><input type="checkbox" name="${c.id}" ${ev[c.id].length && prendidaEnMapa(c.id) ? "checked" : ""} ${ev[c.id].length ? "" : "disabled"}>
+      ${c.titulo} <span class="nota">(${ev[c.id].length})</span></label>`).join("");
+  const fondo = document.createElement("div");
+  fondo.className = "modal-fondo";
+  fondo.innerHTML = `<form class="modal form" novalidate role="dialog" aria-modal="true" aria-labelledby="titulo-dxf">
+      <h2 id="titulo-dxf">Exportar a DXF</h2>
+      <p class="nota">Lo que se ve en la pantalla (escala 1:${numero(escala, 0)}), en SIRGAS 2000 / UTM 21 S (EPSG 31981), en metros: las mismas coordenadas que en QGIS. Cada capa del mapa va en su capa de CAD, con los códigos como texto en otra capa aparte.</p>
+      <div class="dxf-capas">${filas}</div>
+      <label>Altura de los textos (m)<input name="altura" inputmode="decimal" value="${numero(Math.min(20, Math.max(0.5, escala * 0.0018)), 1)}"></label>
+      <p class="error" hidden></p>
+      <div class="dos">
+        <button class="boton" type="button" data-cerrar>Cancelar</button>
+        <button class="boton boton-primario" type="submit">Descargar DXF</button>
+      </div>
+    </form>`;
+  document.body.append(fondo);
+  const f = fondo.querySelector("form"), err = f.querySelector(".error");
+  const cerrar = () => fondo.remove();
+  f.querySelector("[data-cerrar]").onclick = cerrar;
+  fondo.addEventListener("keydown", (e) => { if (e.key === "Escape") cerrar(); });
+  f.querySelector("input[type=checkbox]:not(:disabled)")?.focus();
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    const sel = {};
+    for (const c of DXF_CAPAS) if (f[c.id].checked) sel[c.id] = ev[c.id];
+    if (!Object.keys(sel).length) { err.textContent = "Elegí al menos una capa."; err.hidden = false; return; }
+    const alt = Number(String(f.altura.value).replace(",", "."));
+    if (!(alt > 0 && alt < 1000)) { err.textContent = "La altura de los textos tiene que ser un número de metros, por ejemplo 2,5."; err.hidden = false; return; }
+    // el nombre del archivo lleva el código de la estructura más cercana al centro
+    const c = S.mapa.getCenter();
+    const cerca = [...(ev.estructuras || []), ...(ev.obras || [])].sort((a, b) => c.distanceTo([a.lat, a.lon]) - c.distanceTo([b.lat, b.lon]))[0];
+    const nombre = `obras-oici-${cerca ? String(cerca.codigo).replace(/[^\w-]+/g, "") + "-" : ""}${hoy()}.dxf`;
+    const blob = new Blob([aWindows1252(armarDxf(sel, alt))], { type: "application/dxf" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = nombre;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    aviso("DXF listo: se descargó " + nombre);
+    cerrar();
+  };
+}
+function agregarBotonDxf() {
+  const Ctrl = L.Control.extend({
+    options: { position: "topright" },
+    onAdd() {
+      const div = L.DomUtil.create("div", "leaflet-bar ctrl-dxf");
+      const a = L.DomUtil.create("a", "", div);
+      a.href = "#"; a.role = "button"; a.title = "Exportar a DXF lo que se ve (coordenadas UTM 21 S)"; a.setAttribute("aria-label", a.title);
+      a.innerHTML = "<span>DXF</span>";
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.on(a, "click", (ev) => { L.DomEvent.preventDefault(ev); abrirDxf(); });
+      const ver = () => { div.hidden = S.mapa.getZoom() < ZOOM_DXF; };
+      S.mapa.on("zoomend", ver); ver();
+      return div;
+    },
+  });
+  new Ctrl().addTo(S.mapa);
+}
+
+// Ver todo: aleja el mapa hasta que entra todo lo que está cargado y prendido
+function verTodo() {
+  const pts = (S.ultimosVisibles || []).filter((x) => x.o.lat != null).map((x) => [x.o.lat, x.o.lon]);
+  if (S.capaOn.relev) pts.push(...S.datos.relev.filter((r) => r.lat != null).map((r) => [r.lat, r.lon]));
+  if (S.capaOn.amoj) pts.push(...S.datos.amoj.filter((m) => m.lat != null).map((m) => [m.lat, m.lon]));
+  for (const [k, lista] of [["tri", S.datos.tri], ["padr", S.datos.padr]]) {
+    if (S.capaOn[k]) for (const x of lista) { const ll = anillosDe(x); if (ll) pts.push(...ll.flat(2)); }
+  }
+  const dentro = pts.filter(([la, lo]) => dentroDeUruguay(la, lo));
+  if (!dentro.length) return S.mapa.fitBounds([[-35.0, -58.5], [-30.1, -53.1]]);
+  S.mapa.fitBounds(dentro, { padding: [40, 40], maxZoom: 15 });
+}
+function agregarBotonVerTodo() {
+  const Ctrl = L.Control.extend({
+    options: { position: "topright" },
+    onAdd() {
+      const div = L.DomUtil.create("div", "leaflet-bar ctrl-todo");
+      const a = L.DomUtil.create("a", "", div);
+      a.href = "#"; a.role = "button"; a.title = "Ver todo lo cargado"; a.setAttribute("aria-label", "Ver todo lo cargado");
+      a.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><rect x="9" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.on(a, "click", (ev) => { L.DomEvent.preventDefault(ev); verTodo(); });
+      return div;
+    },
+  });
+  new Ctrl().addTo(S.mapa);
+}
 
 function agregarBotonMedir() {
   const Ctrl = L.Control.extend({

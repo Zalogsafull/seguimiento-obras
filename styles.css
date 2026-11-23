@@ -286,7 +286,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .boton-gps svg { color: var(--acento); flex: none; }
 
 /* Medir distancias */
-.ctrl-medir a { display: flex !important; align-items: center; justify-content: center; }
+.ctrl-todo a, .ctrl-medir a { display: flex !important; align-items: center; justify-content: center; }
 .ctrl-medir.activo a, .ctrl-medir.activo a:hover { background: var(--acento-fuerte) !important; color: #fff !important; }
 .modo-medir, .modo-medir .leaflet-interactive, .modo-medir .leaflet-marker-icon { cursor: crosshair !important; }
 .med-eti span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; font: 600 12px var(--cond); color: #1a1a1a; background: #FFC53D; border-radius: 4px; padding: 1px 5px; box-shadow: 0 1px 3px rgba(0,0,0,.5); pointer-events: none; }
@@ -493,3 +493,10 @@ body.con-tabla .mapa-zona { display: none; }
 /* «+» en la mitad de cada lado del polígono que se edita */
 .vertice-medio span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; box-sizing: border-box;
   background: rgba(30,30,30,.85); color: #6CC4D1; border: 1.5px dashed #6CC4D1; font: 700 13px/1 system-ui, sans-serif; cursor: copy; }
+/* exportar a DXF */
+.ctrl-dxf a { display: flex !important; align-items: center; justify-content: center; }
+.ctrl-dxf a span { font: 700 10.5px/1 system-ui, sans-serif; letter-spacing: .02em; }
+.ctrl-dxf[hidden] { display: none !important; }
+.dxf-capas { display: grid; gap: 2px; }
+.dxf-capas .check { margin: 2px 0 !important; }
+.dxf-capas input:disabled + * , .dxf-capas label:has(input:disabled) { opacity: .5; }
