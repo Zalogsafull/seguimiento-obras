@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-3";
+import { crearApi } from "./api.js?v=2026-11-23-4";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1325,7 +1325,8 @@ async function aplicarMasivo(tipo, k, v, ids) {
 
 // ------------------------------------------------------------ Excel: exportar y volver a subir con cambios
 async function prepararExcel() {
-  await cargarScript("vendor/xlsx/xlsx.full.min.js");
+  // xlsx-js-style: SheetJS 0.18.5 que además escribe colores, bordes y letra
+  await cargarScript("vendor/xlsx/xlsx-estilos.min.js");
   return window.XLSX;
 }
 const TITULO_CORTO = { "Planos (enlace a la carpeta)": "Planos" };
@@ -1342,29 +1343,77 @@ function columnasExcel(tipo) {
   }
   if (tipo === "estructura") cols.push(["Vence recepción", (x) => comoFecha(x.o.vence_recepcion)], ["Días a recepción", (x) => x.o.dias_para_recepcion ?? null]);
   cols.push(["Hitos hechos", (x) => (x.o.hitos_total ? `${x.o.hitos_hechos ?? 0} de ${x.o.hitos_total}` : null)]);
+  // mismo orden que la Tabla: Fin previsto al lado de Fin
+  const iFin = cols.findIndex((c) => c[0] === "Fin"), iPrev = cols.findIndex((c) => c[0] === "Fin previsto");
+  if (iFin >= 0 && iPrev > iFin + 1) cols.splice(iFin + 1, 0, ...cols.splice(iPrev, 1));
   return cols;
 }
 
-async function exportarExcel(id, xs, boton) {
+// Estilos del Excel, parecidos al PDF
+const XL_BORDE = { style: "thin", color: { rgb: "D2D2D2" } };
+const XL = {
+  titulo: { font: { bold: true, sz: 15, color: { rgb: "1E1E1E" } } },
+  sub: { font: { sz: 9, color: { rgb: "5A5A5A" } } },
+  cabeza: { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "3C3C3C" } },
+    alignment: { vertical: "center", wrapText: true }, border: { top: XL_BORDE, bottom: XL_BORDE, left: XL_BORDE, right: XL_BORDE } },
+  celda: { font: { sz: 10, color: { rgb: "282828" } }, alignment: { vertical: "center" },
+    border: { top: XL_BORDE, bottom: XL_BORDE, left: XL_BORDE, right: XL_BORDE } },
+};
+const hexXL = (c) => String(c || "").replace("#", "").toUpperCase().padStart(6, "0").slice(-6);
+// letra blanca o negra según lo oscuro del color de fondo
+function letraSobre(hex) {
+  const n = parseInt(hexXL(hex), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "1E1E1E" : "FFFFFF";
+}
+
+async function exportarExcel(id, filasTabla, boton) {
+  let xs = filasTabla;
   const original = boton?.textContent;
   if (boton) { boton.disabled = true; boton.textContent = "Armando el Excel…"; }
   try {
     const XLSX = await prepararExcel();
     const capa = CAPAS_LISTA.find((c) => c.id === id);
     const cols = columnasExcel(capa.tipo);
-    const filas = [cols.map((c) => c[0]), ...xs.map((x) => cols.map((c) => c[1](x) ?? null))];
+    // mismo orden que el PDF (por etapa o por vencimiento)
+    xs = [...xs].sort(armadoInforme(id).ordenar);
+    const C = 3; // fila de los títulos de columna (0 = título de la hoja)
+    const filas = [
+      [capa.nombre], [`Seguimiento de obras OICI · exportado el ${fecha(hoy())} · ${xs.length} en total`], [],
+      cols.map((c) => c[0]), ...xs.map((x) => cols.map((c) => c[1](x) ?? null))];
     const hoja = XLSX.utils.aoa_to_sheet(filas, { cellDates: true, dateNF: "dd/mm/yyyy" });
-    // Planos: la celda dice «abrir» y el enlace queda detrás (como en la Tabla de la web)
-    cols.forEach(([, , , clase], c) => {
-      if (clase !== "url") return;
-      xs.forEach((x, r) => {
-        const ref = XLSX.utils.encode_cell({ r: r + 1, c }), url = hoja[ref]?.v;
-        if (url) hoja[ref] = { t: "s", v: "abrir", l: { Target: String(url), Tooltip: String(url) } };
+    const ref = (r, c) => XLSX.utils.encode_cell({ r, c });
+    hoja.A1.s = XL.titulo;
+    hoja.A2.s = XL.sub;
+    cols.forEach(([titulo, , , clase], c) => {
+      hoja[ref(C, c)].s = XL.cabeza;
+      xs.forEach((x, i) => {
+        const r = C + 1 + i, k = ref(r, c);
+        if (!hoja[k]) hoja[k] = { t: "s", v: "" }; // vacía pero con bordes
+        const cel = hoja[k];
+        const st = { ...XL.celda, font: { ...XL.celda.font } };
+        if (titulo === "Código") st.font.bold = true;
+        if (titulo === "Etapa" && x.cat) {
+          // el color de la etapa, como en el mapa y las referencias
+          st.fill = { fgColor: { rgb: hexXL(CAT[x.cat].color) } };
+          st.font.color = { rgb: letraSobre(CAT[x.cat].color) };
+          st.font.bold = true;
+        }
+        if (titulo === "Fin previsto" && atrasada(x.o)) st.font = { ...st.font, bold: true, color: { rgb: "C0392B" } };
+        if (titulo === "Días a recepción" && typeof cel.v === "number" && cel.v < 0) st.font = { ...st.font, bold: true, color: { rgb: "C0392B" } };
+        if (clase === "url" && cel.v) {
+          // Planos: la celda dice «abrir» y el enlace queda detrás (como en la Tabla de la web)
+          const url = String(cel.v);
+          hoja[k] = { t: "s", v: "abrir", l: { Target: url, Tooltip: url } };
+          st.font = { ...st.font, underline: true, color: { rgb: "1A66BE" } };
+        }
+        if (cel.t === "d") hoja[k].z = "dd/mm/yyyy";
+        hoja[k].s = st;
       });
     });
-    hoja["!cols"] = cols.map(([t]) => ({ wch: t === "Observaciones" ? 40 : Math.max(10, t.length + 2) }));
-    hoja["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: filas.length - 1, c: cols.length - 1 } }) };
-    hoja["!freeze"] = { xSplit: 2, ySplit: 1 };
+    hoja["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: filas.length - 1, c: cols.length - 1 } });
+    hoja["!cols"] = cols.map(([t]) => ({ wch: t === "Observaciones" ? 40 : t === "Etapa" ? 30 : t === "Código" ? 12 : Math.max(10, t.length + 2) }));
+    hoja["!rows"] = [{ hpt: 22 }, {}, { hpt: 6 }, { hpt: 20 }];
+    hoja["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: C, c: 0 }, e: { r: filas.length - 1, c: cols.length - 1 } }) };
     const editables = cols.filter((c) => c[2]).map((c) => c[0]);
     const leeme = XLSX.utils.aoa_to_sheet([
       ["Seguimiento de obras OICI", ""],
@@ -1381,6 +1430,7 @@ async function exportarExcel(id, xs, boton) {
       ["5. Guardá el archivo y en la web andá a Tabla > Importar Excel. Antes de guardar te muestra la lista de cambios."],
     ]);
     leeme["!cols"] = [{ wch: 48 }, { wch: 90 }];
+    leeme.A1.s = XL.titulo; leeme.A6.s = { font: { bold: true } };
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, capa.tipo === "obra" ? "Obras" : capa.tipo === "relevamiento" ? "Relevamiento" : "Estructuras");
     XLSX.utils.book_append_sheet(libro, leeme, "Leeme");
@@ -1439,7 +1489,9 @@ async function importarExcel(archivo) {
     const ws = libro.Sheets[nombre];
     const filas = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true });
     const r0 = XLSX.utils.decode_range(ws["!ref"] || "A1").s.r;
-    const titulos = (filas[0] || []).map((t) => String(t ?? "").trim());
+    // la fila de títulos es la que tiene «ID» (en los archivos nuevos hay un título arriba)
+    const iCab = Math.max(0, filas.findIndex((f, i) => i < 15 && (f || []).some((t) => String(t ?? "").trim() === "ID")));
+    const titulos = (filas[iCab] || []).map((t) => String(t ?? "").trim());
     const iId = titulos.indexOf("ID");
     if (iId < 0) throw new Error("Falta la columna ID.");
     const cols = columnasExcel(tipo).filter((c) => c[2]).map((c) => ({ titulo: c[0], col: c[2], clase: c[3], k: c[4] || "estado", i: titulos.indexOf(c[0]) }))
@@ -1448,7 +1500,7 @@ async function importarExcel(archivo) {
     const cambios = [], problemas = [];
     let sinId = 0;
     for (const [n, f] of filas.entries()) {
-      if (n === 0) continue;
+      if (n <= iCab) continue;
       if (!f || f.every((v) => v == null || v === "")) continue;
       const id = Number(f[iId]), o = porId.get(id);
       if (!o) { sinId++; continue; }
