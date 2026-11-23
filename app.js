@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-19";
+import { crearApi } from "./api.js?v=2026-11-23-20";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -2144,7 +2144,9 @@ function pintarFicha(tipo, o, hitos, notas) {
        ["Tarea", o.tarea], ["Descripción", o.descripcion], ["Director de obra", o.director_obra], ["Fin previsto", fecha(o.fin_previsto)]];
   const boton = atajo;
   const enlaces = `<div class="atajos">
-      ${boton(o.planos, "planos", "Planos")}
+      ${!o.planos && editor() && S.api.hayCarpetasDrive && o.codigo
+        ? `<button class="atajo" type="button" id="crear-carpeta" title="Crea la carpeta ${esc(o.codigo)} dentro de Estructuras en Drive y la deja en Planos">${ICONO.planos}<span>Crear carpeta</span></button>`
+        : boton(o.planos, "planos", "Planos")}
       ${boton(o.lat != null ? `https://www.google.com/maps/dir/?api=1&destination=${o.lat}%2C${o.lon}&travelmode=driving` : "", "maps", "Maps")}
       ${boton(o.lat != null ? `https://waze.com/ul?ll=${o.lat},${o.lon}&navigate=yes` : "", "waze", "Waze")}
     </div>`;
@@ -2213,6 +2215,16 @@ function pintarFicha(tipo, o, hitos, notas) {
       aviso(fp.value ? `Fin previsto: ${fecha(fp.value)}` : "Fin previsto borrado");
       await abrirFicha(tipo, o.id);
     } catch (e) { aviso(e.message, true); }
+  };
+  const cc = $("#crear-carpeta", ficha);
+  if (cc) cc.onclick = async () => {
+    cc.disabled = true; cc.querySelector("span").textContent = "Creando…";
+    try {
+      const d = await carpetaPlanos(tipo, o.id, o.codigo);
+      aviso(d.nueva ? `Carpeta ${o.codigo} creada en Drive` : `Ya había una carpeta ${o.codigo} en Drive: quedó enlazada`);
+      await cargar();
+      await abrirFicha(tipo, o.id);
+    } catch (e) { aviso(e.message, true); cc.disabled = false; cc.querySelector("span").textContent = "Crear carpeta"; }
   };
   const ed = $("#editar-datos", ficha);
   if (ed) ed.onclick = () => editarDatos(tipo, o);
@@ -2985,7 +2997,7 @@ function pintarNuevo() {
         <label>Año<input name="AÑO" type="number" min="2000" max="2100" value="${new Date().getFullYear()}"></label>
       </div>
       <label>Fecha de inicio<input name="FECHA INICIO" type="date"></label>
-      <label>Planos (enlace a la carpeta)<input name="PLANOS" type="url" placeholder="https://drive.google.com/…"></label>
+      <label>Planos (enlace a la carpeta)<input name="PLANOS" type="url" placeholder="${S.api.hayCarpetasDrive ? "Vacío = se crea la carpeta en Drive" : "https://drive.google.com/…"}"></label>
       <label>Observaciones<textarea name="OBSERVACIONES" rows="2"></textarea></label>
       ${dl("dl-lic", vals("estructura", "licitacion"))}` : `
       <label>Código *<input name="CÓDIGO" required autocomplete="off"></label>
@@ -3003,7 +3015,7 @@ function pintarNuevo() {
         <label>Director de obra<select name="D.O."><option value=""></option>${opts(dos, miDO)}</select></label>
       </div>
       <label>Tarea<input name="Tarea" list="dl-tarea" autocomplete="off"></label>
-      <label>Planos (enlace a la carpeta)<input name="Planos" type="url" placeholder="https://drive.google.com/…"></label>
+      <label>Planos (enlace a la carpeta)<input name="Planos" type="url" placeholder="${S.api.hayCarpetasDrive ? "Vacío = se crea la carpeta en Drive" : "https://drive.google.com/…"}"></label>
       ${dl("dl-sala", vals("obra", "sala"))}${dl("dl-loc", vals("obra", "localidad"))}${dl("dl-dep", vals("obra", "departamento"))}
       ${dl("dl-lic", vals("obra", "licitacion"))}${dl("dl-tarea", vals("obra", "tarea"))}`;
 
@@ -3116,6 +3128,16 @@ function usarGps() {
   }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
 }
 
+// Carpeta de planos en Drive para una estructura u obra nueva: se crea con el código dentro de «Estructuras»
+// y su link queda en Planos. Si falla, el punto queda igual y se avisa.
+const COLUMNA_PLANOS = { estructura: "PLANOS", obra: "Planos" };
+async function carpetaPlanos(tipo, id, codigo) {
+  if (!S.api.hayCarpetasDrive || !COLUMNA_PLANOS[tipo] || !id || !codigo) return null;
+  const d = await S.api.carpetaDrive(codigo);
+  await S.api.guardarDatos(tipo, Number(id), { [COLUMNA_PLANOS[tipo]]: d.url });
+  return d;
+}
+
 async function guardarNuevo(ev) {
   ev.preventDefault();
   const f = ev.target, err = $("#error-nuevo"), b = f.querySelector("button[type=submit]");
@@ -3142,7 +3164,13 @@ async function guardarNuevo(ev) {
   try {
     const id = await S.api.crearPunto(NV.capa, NV.lat, NV.lon, datos);
     const tipo = NV.capa;
-    aviso(`${codigo || "Punto"} agregado`);
+    let carpeta = "";
+    if (COLUMNA_PLANOS[tipo] && !datos[COLUMNA_PLANOS[tipo]] && S.api.hayCarpetasDrive) {
+      b.textContent = "Creando la carpeta en Drive…";
+      try { carpeta = (await carpetaPlanos(tipo, id, codigo)).nueva ? " y carpeta creada en Drive" : " (se usó la carpeta que ya estaba en Drive)"; }
+      catch (e) { carpeta = `. ${e.message}`; }
+    }
+    aviso(`${codigo || "Punto"} agregado${carpeta}`, carpeta.startsWith("."));
     cerrarNuevo();
     NV.z = "";
     if (tipo === "relevamiento") {
@@ -3669,7 +3697,13 @@ async function pegarTodo(van) {
     prog.textContent = `Pegando ${i + 1} de ${van.length}… (${x.codigo || "elemento"})`;
     try {
       if (DESTINO_POLIGONO.has(capa)) await S.api.crearPoligono(capa, x.verts.map((v) => [v.lon, v.lat]), x.datos);
-      else await S.api.crearPunto(capa, x.p.lat, x.p.lon, x.datos);
+      else {
+        const id = await S.api.crearPunto(capa, x.p.lat, x.p.lon, x.datos);
+        if (COLUMNA_PLANOS[capa] && !x.datos[COLUMNA_PLANOS[capa]] && S.api.hayCarpetasDrive) {
+          prog.textContent = `Pegando ${i + 1} de ${van.length}… (${x.codigo || "elemento"}: carpeta en Drive)`;
+          try { await carpetaPlanos(capa, id, x.codigo); } catch (e) { fallas.push(`${x.codigo}: se pegó, pero ${e.message}`); }
+        }
+      }
       ok++;
     } catch (e) {
       fallas.push(`${x.codigo || "elemento " + (i + 1)}: ${e.message}`);

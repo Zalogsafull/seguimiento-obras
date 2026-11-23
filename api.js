@@ -1,5 +1,15 @@
 // Capa de datos: Neon (Data API + Neon Auth) o modo demostración (?demo=1).
-import { NEON_AUTH_URL, NEON_DATA_API_URL } from "./config.js";
+import { NEON_AUTH_URL, NEON_DATA_API_URL, DRIVE_CARPETAS_URL } from "./config.js";
+
+// Pide al script de Google la carpeta de planos (la crea dentro de «Estructuras» o devuelve la que ya hay).
+async function pedirCarpeta(codigo, token) {
+  let r;
+  try { r = await fetch(DRIVE_CARPETAS_URL, { method: "POST", body: JSON.stringify({ codigo, token }) }); }
+  catch { throw new Error("Carpeta en Drive: no se pudo conectar con Google. Creala con el botón «Crear carpeta» de la ficha."); }
+  const d = await r.json().catch(() => ({ error: "Respuesta rara de Google" }));
+  if (d.error || !d.url) throw new Error(`Carpeta en Drive: ${d.error || "no se pudo crear"}`);
+  return d;
+}
 
 const TABLA = { estructura: "Estructuras OICI Obra", obra: "Obras" };
 const CAMPO_ESTADO = { estructura: "ESTADO", obra: "Estado" };
@@ -119,6 +129,11 @@ async function crearNeon() {
       await editarCapa(tipo, id, cambios, "Guardar datos");
     },
     async adminUsuarios() { return chequear(await neon.rpc("admin_usuarios"), "Usuarios"); },
+    hayCarpetasDrive: !!DRIVE_CARPETAS_URL,
+    async carpetaDrive(codigo) {
+      const token = (await neon.auth.getSession())?.data?.session?.token;
+      return pedirCarpeta(codigo, token);
+    },
     async crearPunto(capa, lat, lon, datos) {
       return chequear(await neon.rpc("crear_punto", { p_capa: capa, p_lat: lat, p_lon: lon, p_datos: datos }), "Agregar punto");
     },
@@ -290,6 +305,8 @@ function crearDemo() {
     async perfil() { await espera(); return structuredClone(yo); },
     async elegirMiDO(ini) { await espera(); yo.iniciales_do = ini; Object.assign(cuentas.find((c) => c.user_id === "demo"), { iniciales_do: ini }); },
     async adminUsuarios() { await espera(); return structuredClone(cuentas); },
+    hayCarpetasDrive: true,
+    async carpetaDrive(codigo) { await espera(); return { url: `https://drive.google.com/drive/folders/demo-${encodeURIComponent(codigo)}`, nueva: true }; },
     async crearPunto(capa, lat, lon, d) {
       await espera();
       if (capa === "amojonamiento") {

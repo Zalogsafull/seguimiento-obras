@@ -544,3 +544,4 @@ body.con-tabla .mapa-zona { display: none; }
   .barra .usuario { gap: 6px; }
   .barra .usuario > .boton-chico:not(.boton-icono) { padding-left: 9px; padding-right: 9px; }
 }
+button.atajo { font: inherit; cursor: pointer; }
