@@ -7,4 +7,4 @@ export const PLAZO_RECEPCION_DIAS = 730;
 
 // Aplicación web de Google Apps Script que crea la carpeta de planos en Drive (apps-script/carpetas_drive.gs).
 // Vacío = no se crean carpetas.
-export const DRIVE_CARPETAS_URL = "https://script.google.com/macros/s/AKfycbzzmhgojF6yMKf5rUKulatlwOSHwt6pWfwFNj6d6SYiWME59ToNIQr44al9wP_1jWcI/exec";
+export const DRIVE_CARPETAS_URL = "https://script.google.com/macros/s/AKfycby-ZHmnupCfF1RwOkJbfFmW1cNK3cwjdAHBNyEpp09VbEtgRk_BsksA2fHsngL5kw8U/exec";
