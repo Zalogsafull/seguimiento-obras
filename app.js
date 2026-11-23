@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-16";
+import { crearApi } from "./api.js?v=2026-11-23-17";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1308,8 +1308,9 @@ function pintarTabla() {
       <span id="t-valor"></span>
       <button class="boton boton-primario boton-chico" type="submit">Aplicar</button>` : `<b>${nSel} elegida${nSel === 1 ? "" : "s"}</b>`}
       <button class="boton boton-chico" type="button" id="t-ver">Ver en el mapa</button>
+      <button class="boton boton-chico" type="button" id="t-limpiar">Limpiar selección</button>
       <span class="t-progreso" id="t-progreso"></span>
-      ${editor() ? `<button class="boton boton-peligro boton-chico" type="button" id="t-borrar">${admin ? "Eliminar" : "Pedir eliminar"} ${nSel === 1 ? "la elegida" : `las ${nSel} elegidas`}</button>` : ""}
+      ${editor() ? `<button class="boton boton-peligro boton-chico" type="button" id="t-borrar">${admin ? "Eliminar selección" : "Pedir eliminar selección"}</button>` : ""}
     </form>` : ""}
     <div class="tabla-scroll">
       <table class="tabla-datos">
@@ -1394,6 +1395,8 @@ function pintarTabla() {
   } else if (m) m.onsubmit = (ev) => ev.preventDefault();
   const tb = $("#t-borrar");
   if (tb) tb.onclick = () => borrarElegidas(tipo, xs.filter((x) => T.sel.has(x.o.id)));
+  const tl2 = $("#t-limpiar");
+  if (tl2) tl2.onclick = () => { T.sel.clear(); pintarTabla(); };
   const tv = $("#t-ver");
   if (tv) tv.onclick = () => verElegidasEnMapa(tipo, xs.filter((x) => T.sel.has(x.o.id)));
 }
