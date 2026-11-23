@@ -21,7 +21,7 @@ DROP FUNCTION IF EXISTS public.admin_usuarios();
 CREATE FUNCTION public.admin_usuarios()
 RETURNS TABLE (user_id text, email text, nombre_cuenta text, registrado text,
                nombre text, rol text, iniciales_do text, admin boolean, habilitado boolean, con_obras boolean)
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $fn$
 #variable_conflict use_column
 BEGIN
   IF NOT public.es_admin() THEN
@@ -34,18 +34,20 @@ BEGIN
   FROM (SELECT to_jsonb(u) AS j FROM neon_auth."user" u) x
   LEFT JOIN public.usuarios_web w ON w.user_id = x.j->>'id'
   ORDER BY (w.user_id IS NOT NULL), coalesce(x.j->>'createdAt', x.j->>'created_at') DESC NULLS LAST;
-END $$;
+END $fn$;
 
 -- Habilitar o actualizar una cuenta, con su tipo.
--- p_con_obras vacío (web vieja todavía en caché): con obras si tiene iniciales.
+-- Si no llega el tipo (web vieja todavía en caché): con obras si tiene iniciales.
+-- (Escrita sin ON CONFLICT: el editor de Neon cortaba la función en esa parte.)
 DROP FUNCTION IF EXISTS public.admin_habilitar(text, text, text, text);
 DROP FUNCTION IF EXISTS public.admin_habilitar(text, text, text, text, boolean);
 CREATE FUNCTION public.admin_habilitar(p_user_id text, p_nombre text, p_rol text, p_iniciales text,
                                        p_con_obras boolean DEFAULT NULL)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
 DECLARE
-  v_ini  text := nullif(trim(p_iniciales), '');
-  v_con  boolean := coalesce(p_con_obras, v_ini IS NOT NULL);
+  v_ini    text;
+  v_con    boolean;
+  v_nombre text;
 BEGIN
   IF NOT public.es_admin() THEN
     RAISE EXCEPTION 'Solo un administrador puede habilitar usuarios';
@@ -56,26 +58,39 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM neon_auth."user" u WHERE to_jsonb(u)->>'id' = p_user_id) THEN
     RAISE EXCEPTION 'Esa cuenta no existe';
   END IF;
-  IF NOT v_con THEN v_ini := NULL; END IF;  -- quien ve todas no tiene D.O.
-  INSERT INTO public.usuarios_web (user_id, nombre, rol, iniciales_do, con_obras)
-  VALUES (p_user_id, coalesce(nullif(trim(p_nombre), ''), 'Sin nombre'), p_rol, v_ini, v_con)
-  ON CONFLICT (user_id) DO UPDATE
-    SET nombre = EXCLUDED.nombre, rol = EXCLUDED.rol, iniciales_do = EXCLUDED.iniciales_do, con_obras = EXCLUDED.con_obras;
-END $$;
+  v_ini := nullif(trim(p_iniciales), '');
+  v_con := coalesce(p_con_obras, v_ini IS NOT NULL);
+  IF NOT v_con THEN
+    v_ini := NULL;
+  END IF;
+  v_nombre := coalesce(nullif(trim(p_nombre), ''), 'Sin nombre');
+  UPDATE public.usuarios_web SET nombre = v_nombre, rol = p_rol, iniciales_do = v_ini, con_obras = v_con
+  WHERE user_id = p_user_id;
+  IF NOT FOUND THEN
+    INSERT INTO public.usuarios_web (user_id, nombre, rol, iniciales_do, con_obras)
+    VALUES (p_user_id, v_nombre, p_rol, v_ini, v_con);
+  END IF;
+END $fn$;
 
 -- El propio usuario "con obras" elige qué director de obra es
 CREATE OR REPLACE FUNCTION public.elegir_mi_do(p_iniciales text)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_ini text := nullif(trim(p_iniciales), '');
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  v_ini text;
 BEGIN
-  IF v_ini IS NULL THEN RAISE EXCEPTION 'Elegí qué director de obra sos'; END IF;
-  IF length(v_ini) > 20 THEN RAISE EXCEPTION 'Las iniciales son demasiado largas'; END IF;
+  v_ini := nullif(trim(p_iniciales), '');
+  IF v_ini IS NULL THEN
+    RAISE EXCEPTION 'Elegí qué director de obra sos';
+  END IF;
+  IF length(v_ini) > 20 THEN
+    RAISE EXCEPTION 'Las iniciales son demasiado largas';
+  END IF;
   UPDATE public.usuarios_web SET iniciales_do = v_ini
   WHERE user_id = auth.user_id() AND con_obras;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Tu usuario no es de tipo "con obras": pedile al administrador que lo cambie';
   END IF;
-END $$;
+END $fn$;
 
 REVOKE ALL ON FUNCTION public.admin_usuarios(), public.admin_habilitar(text, text, text, text, boolean),
   public.elegir_mi_do(text) FROM PUBLIC;
