@@ -537,3 +537,10 @@ body.con-tabla .mapa-zona { display: none; }
 .hist-accion .acciones { display: flex; gap: 6px; }
 .hist-accion.deshecha .hist-que, .hist-accion.deshecha ul { text-decoration: line-through; opacity: .6; }
 .hist-deshecho { margin: 0 0 6px; }
+/* en el celular, «+ Punto» y «+ Polígono» sin la palabra «nuevo» para que entre todo en la barra */
+@media (max-width: 760px) { .palabra-nuevo { display: none; } }
+.barra .usuario > .boton { white-space: nowrap; }
+@media (max-width: 760px) {
+  .barra .usuario { gap: 6px; }
+  .barra .usuario > .boton-chico:not(.boton-icono) { padding-left: 9px; padding-right: 9px; }
+}

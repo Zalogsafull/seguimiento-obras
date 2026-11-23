@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-18";
+import { crearApi } from "./api.js?v=2026-11-23-19";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -438,6 +438,7 @@ function ponerUsuario() {
   $("#boton-usuarios").hidden = !S.perfil.admin;
   $("#boton-historial").hidden = !S.perfil.admin;
   $("#boton-nuevo").hidden = !editor();
+  $("#boton-poligono").hidden = !editor();
 }
 
 function mostrarApp() {
@@ -453,6 +454,7 @@ function mostrarApp() {
   }
   $("#mi-do").onclick = () => preguntarDO(true);
   $("#boton-nuevo").onclick = abrirNuevo;
+  $("#boton-poligono").onclick = () => abrirDibujo(DIB.ultimoDestino || "triangulo");
   document.addEventListener("paste", alPegar);
   $("#recargar").onclick = () => {
     $("#recargar").classList.add("girando");
@@ -3009,8 +3011,7 @@ function pintarNuevo() {
     <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Punto nuevo</h2>
       <p class="nota" style="margin:0">Buscá las coordenadas o tocá el mapa. Después podés arrastrar la marca para corregir la ubicación.</p>
       <div class="botones-nuevo">
-        <button class="boton boton-chico boton-pegar" type="button" id="abrir-pegar">Pegar desde QGIS o Excel</button>
-        <button class="boton boton-chico boton-pegar" type="button" id="abrir-dibujo">Dibujar triángulo o padrón</button>
+        <button class="boton boton-chico boton-pegar" type="button" id="abrir-pegar" title="Pegar puntos copiados en QGIS o coordenadas de Excel">Pegar desde QGIS o Excel</button>
       </div></div>
     <form class="form" id="form-nuevo" novalidate>
       <div class="ficha-bloque">
@@ -3058,12 +3059,7 @@ function pintarNuevo() {
   enlazarCerrar(caja, cerrarNuevo);
   const f = $("#form-nuevo");
   $("#cancelar-nuevo").onclick = cerrarNuevo;
-  $("#abrir-dibujo").onclick = () => abrirDibujo("triangulo");
-  $("#abrir-pegar").onclick = async () => {
-    let lote = null;
-    try { lote = leerPegado(await navigator.clipboard.readText()); } catch (e) { /* sin permiso: se pega a mano */ }
-    abrirPegar(lote);
-  };
+  $("#abrir-pegar").onclick = () => pegarDesdePortapapeles(NV.capa);
   f.querySelectorAll("input[name=capa]").forEach((r) => (r.onchange = () => {
     NV.capa = r.value;
     const lat = NV.lat, lon = NV.lon;
@@ -3442,7 +3438,13 @@ function prepararPegado() {
   });
 }
 
-function abrirPegar(lote) {
+// Lee el portapapeles y abre «Pegar elementos» proponiendo la capa del panel desde el que se pidió
+async function pegarDesdePortapapeles(preferida) {
+  let lote = null;
+  try { lote = leerPegado(await navigator.clipboard.readText()); } catch (e) { /* sin permiso: se pega a mano */ }
+  abrirPegar(lote, preferida);
+}
+function abrirPegar(lote, preferida) {
   if (!editor()) return aviso("Solo un usuario con permiso de editor puede pegar elementos.", true);
   if (MED.activo) terminarMedida();
   if (DIB.activo) terminarDibujo();
@@ -3450,6 +3452,7 @@ function abrirPegar(lote) {
   $("#ficha").hidden = true; $("#admin").hidden = true;
   PG.lote = lote;
   PG.corriendo = false;
+  if (preferida !== undefined) PG.preferida = preferida; // undefined: sigue la de antes (pegado a mano en el cuadro)
   if (lote) {
     PG.sistema = sistemaDe(lote);
     PG.capa = capaSugerida(lote);
@@ -3465,7 +3468,12 @@ function capaSugerida(lote) {
   const k = new Set(lote.titulos.map(clave));
   // si la mayoría de lo copiado son polígonos, va a una capa de polígonos
   const nPol = lote.filas.filter((f) => f.geo.anillo).length, nPt = lote.filas.filter((f) => f.geo.x != null).length;
-  if (nPol > nPt) return k.has("PADRON") ? "padron" : "triangulo";
+  const pref = PG.preferida;
+  if (nPol > nPt) return pref === "padron" || pref === "triangulo" ? (k.has("PADRON") ? "padron" : pref) : k.has("PADRON") ? "padron" : "triangulo";
+  // puntos pegados desde «Polígono nuevo»: se unen en un polígono de esa capa
+  if (nPt && DESTINO_POLIGONO.has(pref)) return pref;
+  // coordenadas pegadas desde «Punto nuevo»: van a la capa de puntos elegida, cada una por separado
+  if (pref && !DESTINO_POLIGONO.has(pref) && (lote.origen === "lista" || !lote.titulos.length)) return pref;
   if (lote.origen === "lista") return lote.filas.length >= 3 ? "padron" : "amojonamiento";
   const puntaje = (capa) => columnasDestino(capa).filter((c) => k.has(clave(c))).length
     + (capa === "estructura" && k.has("ESTRUCTURA") ? 3 : 0) + (capa === "obra" && (k.has("SALA") || k.has("LOCALIDAD")) ? 3 : 0)
@@ -3692,7 +3700,7 @@ function alPegar(ev) {
   if (!lote) return;
   ev.preventDefault();
   if (PG.corriendo) return aviso("Esperá a que termine de pegar lo anterior.", true);
-  abrirPegar(lote);
+  abrirPegar(lote, null);
 }
 
 // ------------------------------------------------------------ agrimensura: Amojonamiento, Triángulos y Padrones
@@ -4099,10 +4107,11 @@ function pintarDibujo() {
   const caja = $("#nuevo"), tri = DIB.destino === "triangulo", ed = DIB.editar;
   const admin = !!S.perfil?.admin;
   caja.innerHTML = `
-    <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">${ed ? `Editar ${esc(ed.nombre)}` : "Dibujar polígono"}</h2>
+    <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">${ed ? `Editar ${esc(ed.nombre)}` : "Polígono nuevo"}</h2>
       <p class="nota" style="margin:0">${ed
         ? "Arrastrá un vértice para moverlo y tocalo para sacarlo. Para agregar uno, tocá el + en la mitad de un lado (o arrastralo), o tocá el mapa cerca del lado. Cerca de un mojón, el vértice se engancha a él. Nada se guarda hasta que aceptes."
-        : "Tocá el mapa para marcar cada vértice. Cerca de un mojón, el vértice se engancha a él (rojo); en otro lugar queda como punto extra (blanco). Arrastrá un vértice para moverlo o tocalo para sacarlo. Tocá el 1 para cerrar."}</p></div>
+        : "Tocá el mapa para marcar cada vértice. Cerca de un mojón, el vértice se engancha a él (rojo); en otro lugar queda como punto extra (blanco). Arrastrá un vértice para moverlo o tocalo para sacarlo. Tocá el 1 para cerrar."}</p>
+      ${ed ? "" : `<div class="botones-nuevo"><button class="boton boton-chico boton-pegar" type="button" id="dib-pegar" title="Pegar polígonos copiados en QGIS, o los vértices de un padrón copiados de Excel">Pegar desde QGIS o Excel</button></div>`}</div>
     <form class="form" id="form-dibujo" novalidate>
       ${ed ? "" : `<div class="ficha-bloque">
         <h2>Capa</h2>
@@ -4140,7 +4149,12 @@ function pintarDibujo() {
   enlazarCerrar(caja, salirDibujo);
   const f = $("#form-dibujo");
   $("#dib-cancelar").onclick = salirDibujo;
-  f.querySelectorAll("input[name=destino]").forEach((r) => (r.onchange = () => { DIB.destino = r.value; pintarDibujo(); }));
+  const dp = $("#dib-pegar");
+  if (dp) dp.onclick = () => {
+    if (DIB.v.length >= 2 && !confirm("¿Dejar el polígono que estás dibujando para pegar lo copiado?")) return;
+    pegarDesdePortapapeles(DIB.destino);
+  };
+  f.querySelectorAll("input[name=destino]").forEach((r) => (r.onchange = () => { DIB.destino = DIB.ultimoDestino = r.value; pintarDibujo(); }));
   if (f.codigo) f.codigo.oninput = () => { DIB.tocado = true; DIB.datos["CÓDIGO"] = f.codigo.value.trim(); };
   if (f.padron) f.padron.oninput = () => { DIB.datos.PADRON = f.padron.value.trim(); };
   $("#dib-deshacer").onclick = () => { if (DIB.pasos.length) DIB.v = DIB.pasos.pop(); dibujarDibujo(); actualizarMedidas(); };
