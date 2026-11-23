@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-15";
+import { crearApi } from "./api.js?v=2026-11-23-16";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1792,13 +1792,6 @@ function pintarAjustes() {
     conObras() ? (S.perfil.iniciales_do ? "Director de obra " + S.perfil.iniciales_do : "Director de obra (sin elegir)") : "Ve todas las obras"].filter(Boolean).join(" · ");
   $("#mi-do").hidden = !conObras();
   $("#mi-do").textContent = S.perfil?.iniciales_do ? "Cambiar mi director de obra" : "Elegir mi director de obra";
-  const m = $("#ajustes-mapa");
-  m.innerHTML = `
-    <div class="segmentado bases-seg" role="radiogroup" aria-label="Mapa base">${Object.keys(S.base).map((b) =>
-      `<label><input type="radio" name="base" value="${b}" ${S.baseNombre === b ? "checked" : ""}> ${b === "Gris (como QGIS)" ? "Gris" : b}</label>`).join("")}</div>
-    ${S.baseNombre.startsWith("Gris") ? `<label class="rango">Calles en el fondo gris <span class="valor-calles">${Math.round(S.callesGris * 100)}%</span>
-      <input type="range" name="calles" min="0" max="80" step="5" value="${Math.round(S.callesGris * 100)}"></label>` : ""}`;
-  enlazarBase(m);
   const fichas = Object.keys(leerJSON(CLAVE_FICHAS) || {}).length;
   $("#ajustes-datos").textContent = S.datosDe
     ? `Datos ${cuandoTexto(S.datosDe)}, con ${fichas} ficha${fichas === 1 ? "" : "s"} guardada${fichas === 1 ? "" : "s"} para ver sin señal.`
@@ -2745,7 +2738,7 @@ function agregarBotonesPaneles() {
     options: { position: "topleft" },
     onAdd() {
       const div = L.DomUtil.create("div", "leaflet-bar ctrl-paneles");
-      for (const [modo, titulo] of [["capas", "Capas de obra"], ["utilidad", "Capas de utilidad: relevamiento, amojonamiento, triángulos, padrones y departamentos"], ["filtros", "Filtros"], ["lista", "Lista de lo que se ve en el mapa"], ["referencias", "Referencias: qué quiere decir cada símbolo"], ["ajustes", "Ajustes: cuenta, mapa y datos guardados"]]) {
+      for (const [modo, titulo] of [["capas", "Capas de obra"], ["utilidad", "Capas de utilidad: relevamiento, amojonamiento, triángulos, padrones y departamentos"], ["filtros", "Filtros"], ["lista", "Lista de lo que se ve en el mapa"], ["referencias", "Referencias: qué quiere decir cada símbolo"], ["ajustes", "Ajustes: cuenta, pedidos, historial y datos guardados"]]) {
         const a = L.DomUtil.create("a", "", div);
         a.href = "#"; a.role = "button"; a.dataset.modo = modo; a.title = titulo; a.setAttribute("aria-label", titulo);
         a.innerHTML = ICONOS[modo];
