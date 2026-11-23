@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-13";
+import { crearApi } from "./api.js?v=2026-11-23-14";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1186,8 +1186,50 @@ function abrirTabla() {
 // En la computadora, «Ver en el mapa» deja el mapa a la izquierda y la Tabla más angosta a la derecha
 function tablaAlCostado(si) {
   document.body.classList.toggle("tabla-lado", si);
+  if (si) ponerAnchoTabla(UI.tablaAncho);
   S.verBotonDxf?.();
   setTimeout(() => S.mapa.invalidateSize(), 60);
+}
+// Ancho de la Tabla al costado (se arrastra el borde izquierdo, como el panel); se recuerda
+const anchoZonaMapa = () => $("#tabla").parentElement.getBoundingClientRect().width - ($("#vista-app").classList.contains("plegado") || movil.matches ? 0 : UI.ancho);
+function ponerAnchoTabla(w) {
+  if (!w) return document.body.style.removeProperty("--tabla-lado");
+  const total = anchoZonaMapa();
+  const ok = Math.round(Math.min(Math.max(w, 380), Math.max(380, total - 220)));
+  document.body.style.setProperty("--tabla-lado", ok + "px");
+  return ok;
+}
+function enlazarAsaTabla(asa) {
+  asa.onpointerdown = (ev) => {
+    ev.preventDefault();
+    asa.setPointerCapture(ev.pointerId);
+    asa.classList.add("arrastrando");
+    const derecha = $("#tabla").getBoundingClientRect().right;
+    let ancho = UI.tablaAncho;
+    const mover = (e) => {
+      ancho = derecha - e.clientX;
+      ponerAnchoTabla(ancho);
+      S.mapa.invalidateSize();
+    };
+    const soltar = () => {
+      asa.classList.remove("arrastrando");
+      asa.onpointermove = asa.onpointerup = asa.onpointercancel = null;
+      // llevándola casi hasta la izquierda, la tabla queda sola
+      if (ancho > anchoZonaMapa() - 160) { tablaAlCostado(false); pintarTabla(); return; }
+      UI.tablaAncho = ponerAnchoTabla(ancho);
+      guardarUI();
+      S.mapa.invalidateSize();
+    };
+    asa.onpointermove = mover;
+    asa.onpointerup = asa.onpointercancel = soltar;
+  };
+  // con el teclado: flechas para achicar o agrandar
+  asa.onkeydown = (ev) => {
+    if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+    ev.preventDefault();
+    UI.tablaAncho = ponerAnchoTabla(($("#tabla").getBoundingClientRect().width) + (ev.key === "ArrowLeft" ? 40 : -40));
+    guardarUI(); S.mapa.invalidateSize();
+  };
 }
 function cerrarTabla() {
   document.body.classList.remove("tabla-lado");
@@ -1234,6 +1276,8 @@ function pintarTabla() {
   const todosSel = xs.length && xs.every((x) => T.sel.has(x.o.id));
   const flecha = (k) => (T.orden === k ? (T.desc ? " ▾" : " ▴") : "");
   caja.innerHTML = `
+    ${document.body.classList.contains("tabla-lado") ? `<div class="asa-tabla solo-compu" id="t-asa" role="separator" aria-orientation="vertical" tabindex="0"
+      title="Arrastrá para cambiar el ancho de la tabla (hasta la izquierda: solo tabla)" aria-label="Cambiar el ancho de la tabla"></div>` : ""}
     <div class="tabla-barra">
       <h2>Tabla de atributos</h2>
       <select id="t-capa" aria-label="Capa">${opcionesCapas(T.capa)}</select>
@@ -1244,7 +1288,9 @@ function pintarTabla() {
       <button class="boton boton-chico" type="button" id="t-excel">Exportar Excel</button>`}
       ${puede ? `<button class="boton boton-chico" type="button" id="t-importar" title="Subir un Excel exportado desde acá, con datos cambiados">Importar Excel</button>
         <input type="file" id="t-archivo" accept=".xlsx,.xls" hidden>` : ""}
-      ${document.body.classList.contains("tabla-lado") ? `<button class="boton boton-chico solo-compu" type="button" id="t-ancha" title="La tabla vuelve a ocupar todo el ancho">Tabla completa</button>` : ""}
+      ${document.body.classList.contains("tabla-lado")
+        ? `<button class="boton boton-chico solo-compu t-modo" type="button" id="t-ancha" title="La tabla ocupa todo el ancho y se oculta el mapa">Solo tabla</button>`
+        : `<button class="boton boton-chico solo-compu t-modo" type="button" id="t-lado" title="El mapa a la izquierda y la tabla a la derecha">Tabla y mapa</button>`}
       <button class="cerrar" type="button" id="t-cerrar" aria-label="Cerrar la tabla" title="Cerrar la tabla">✕</button>
     </div>
     <div class="tabla-import" id="t-import" hidden></div>
@@ -1283,6 +1329,10 @@ function pintarTabla() {
   $("#t-cerrar").onclick = cerrarTabla;
   const ta = $("#t-ancha");
   if (ta) ta.onclick = () => { tablaAlCostado(false); pintarTabla(); };
+  const tl = $("#t-lado");
+  if (tl) tl.onclick = () => { tablaAlCostado(true); pintarTabla(); };
+  const asa = $("#t-asa");
+  if (asa) enlazarAsaTabla(asa);
   $("#t-capa").onchange = (ev) => {
     T.capa = ev.target.value; T.sel.clear(); T.desc = false;
     T.orden = COLUMNAS_TABLA[CAPAS_LISTA.find((c) => c.id === T.capa).tipo][0][0];

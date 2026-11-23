@@ -516,3 +516,11 @@ body.con-tabla .mapa-zona { display: none; }
   body.tabla-lado .tabla-vista { width: var(--tabla-lado); justify-self: end; box-shadow: -6px 0 18px rgba(0,0,0,.35); }
   body.tabla-lado .tabla-barra input[type=search] { width: 160px; }
 }
+
+/* Tabla al costado: borde para cambiar el ancho y botón Solo tabla / Tabla y mapa junto al ✕ */
+.asa-tabla { position: absolute; top: 0; left: -5px; width: 10px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
+.asa-tabla:hover, .asa-tabla.arrastrando, .asa-tabla:focus-visible { outline: none; background: linear-gradient(90deg, transparent 4px, var(--acento) 4px 6px, transparent 6px); }
+@media (min-width: 761px) {
+  .tabla-barra { padding-right: 170px; }
+  .tabla-barra .t-modo { position: absolute; top: 10px; right: 56px; height: 32px; }
+}
