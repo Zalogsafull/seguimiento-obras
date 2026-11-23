@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-24";
+import { crearApi } from "./api.js?v=2026-11-23-25";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -843,9 +843,14 @@ function enlazarBorrar(ficha, tipo, o) {
   };
   const b = $("#borrar-elemento", ficha);
   if (b) b.onclick = async () => {
-    if (!confirm(`¿Borrar ${cod}? Se borra para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base por 30 días.`)) return;
+    if (!confirm(`¿Borrar ${cod}? Se borra para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base por 30 días.`
+      + (tieneCarpeta(tipo, o) ? "\n\nSu carpeta de planos va a la papelera de Drive (se puede recuperar durante 30 días)." : ""))) return;
     b.disabled = true;
-    try { await S.api.pedirBorrado(tipo, o.id, null); await despues(`${cod} borrado`); }
+    try {
+      const r = await S.api.pedirBorrado(tipo, o.id, null);
+      const extra = r === "BORRADO" ? await carpetaTrasBorrar(tipo, o) : "";
+      await despues(`${cod} borrado${extra}`);
+    }
     catch (e) { aviso(e.message, true); b.disabled = false; }
   };
   const pb = $("#pedir-borrado", ficha), fb = $("#form-borrado", ficha);
@@ -873,10 +878,15 @@ function enlazarBorrar(ficha, tipo, o) {
   });
 }
 async function resolverPedido(id, aprobar, cod, desdeFicha) {
-  if (aprobar && !confirm(`¿Aprobar y borrar ${cod}? Se borra para todos (web, QGIS y QField). Queda una copia de respaldo en la base por 30 días.`)) return;
+  const sol = (S.solicitudes || []).find((x) => x.id === id);
+  const obj = sol && S.datos[DATOS_DE_TIPO[sol.tipo] || sol.tipo]?.find((y) => y.id === sol.objeto_id);
+  const conCarpeta = sol && tieneCarpeta(sol.tipo, obj);
+  if (aprobar && !confirm(`¿Aprobar y borrar ${cod}? Se borra para todos (web, QGIS y QField). Queda una copia de respaldo en la base por 30 días.`
+    + (conCarpeta ? "\n\nSu carpeta de planos va a la papelera de Drive (se puede recuperar durante 30 días)." : ""))) return;
   try {
     await S.api.resolverBorrado(id, aprobar);
-    aviso(aprobar ? `${cod} borrado` : "Pedido rechazado");
+    const extra = aprobar && conCarpeta ? await carpetaTrasBorrar(sol.tipo, obj) : "";
+    aviso(aprobar ? `${cod} borrado${extra}` : "Pedido rechazado", extra.startsWith("."), extra ? 7000 : 0);
     if (desdeFicha && aprobar) cerrarFicha();
     await cargar();
     if (desdeFicha && !aprobar && S.abierta) {
@@ -1453,17 +1463,25 @@ async function borrarElegidas(tipo, filas) {
   const nombres = filas.slice(0, 6).map((x) => nombreBorrar(tipo, x.o)).join(", ") + (n > 6 ? ` y ${n - 6} más` : "");
   let motivo = null;
   if (admin) {
-    if (!confirm(`¿Eliminar ${n === 1 ? "1 elemento" : `${n} elementos`} de ${CAPAS_LISTA.find((c) => c.id === T.capa).nombre}?\n${nombres}\n\nSe borran para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base por 30 días.`)) return;
+    const nCarpetas = filas.filter((x) => tieneCarpeta(tipo, x.o)).length;
+    if (!confirm(`¿Eliminar ${n === 1 ? "1 elemento" : `${n} elementos`} de ${CAPAS_LISTA.find((c) => c.id === T.capa).nombre}?\n${nombres}\n\nSe borran para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base por 30 días.`
+      + (nCarpetas ? `\n\n${nCarpetas === 1 ? "Su carpeta" : `Sus ${nCarpetas} carpetas`} de planos van a la papelera de Drive (se pueden recuperar durante 30 días).` : ""))) return;
   } else {
     motivo = prompt(`Vas a pedir que se eliminen ${n === 1 ? "1 elemento" : `${n} elementos`}: ${nombres}.\n¿Por qué? (lo ve el administrador)`, "");
     if (motivo === null) return;
   }
   const prog = $("#t-progreso"), b = $("#t-borrar");
   if (b) b.disabled = true;
-  const r = { BORRADO: 0, PEDIDO: 0, YA_PEDIDO: 0 }, fallas = [];
+  const r = { BORRADO: 0, PEDIDO: 0, YA_PEDIDO: 0 }, fallas = [], sinCarpeta = [];
   for (const [i, x] of filas.entries()) {
     if (prog) prog.textContent = `${i + 1} de ${n}…`;
-    try { const res = await S.api.pedirBorrado(tipo, x.o.id, motivo || null); r[res] = (r[res] || 0) + 1; }
+    try {
+      const res = await S.api.pedirBorrado(tipo, x.o.id, motivo || null); r[res] = (r[res] || 0) + 1;
+      if (res === "BORRADO" && tieneCarpeta(tipo, x.o)) {
+        const extra = await carpetaTrasBorrar(tipo, x.o);
+        if (extra.startsWith(" y")) r.carpetas = (r.carpetas || 0) + 1; else if (extra) sinCarpeta.push(`${nombreBorrar(tipo, x.o)}${extra}`);
+      }
+    }
     catch (e) {
       fallas.push(`${nombreBorrar(tipo, x.o)}: ${e.message}`);
       if (/parte9|parte16|permiso|editor|failed to fetch|networkerror/i.test(e.message)) break;
@@ -1471,9 +1489,11 @@ async function borrarElegidas(tipo, filas) {
   }
   const partes = [];
   if (r.BORRADO) partes.push(`${r.BORRADO} eliminado${r.BORRADO === 1 ? "" : "s"}`);
+  if (r.carpetas) partes.push(`${r.carpetas} carpeta${r.carpetas === 1 ? "" : "s"} de planos a la papelera de Drive`);
   if (r.PEDIDO) partes.push(`${r.PEDIDO} pedido${r.PEDIDO === 1 ? "" : "s"} enviado${r.PEDIDO === 1 ? "" : "s"} al administrador`);
   if (r.YA_PEDIDO) partes.push(`${r.YA_PEDIDO} ya estaba${r.YA_PEDIDO === 1 ? "" : "n"} pedido${r.YA_PEDIDO === 1 ? "" : "s"}`);
   if (partes.length) aviso(partes.join(" · "));
+  if (sinCarpeta.length) aviso(sinCarpeta.slice(0, 3).join(" · "), true, 10000);
   if (fallas.length) aviso(`No se pudieron eliminar ${fallas.length}: ${fallas.slice(0, 3).join(" · ")}`, true);
   T.sel.clear();
   await cargar();
@@ -3139,6 +3159,19 @@ const CLAVE_CARPETAS_OMITIDAS = "obras-carpetas-omitidas";
 const finMas = (o, dias) => { const d = new Date(o.fecha_fin + "T12:00:00"); d.setDate(d.getDate() + dias); return d; };
 const carpetaVencida = (o) => !!o.fecha_fin && finMas(o, DIAS_CARPETA) <= new Date();
 const esCarpetaDrive = (u) => /drive\.google\.com/i.test(u || "") && /[-\w]{25,}/.test(u || "");
+
+// Al borrar una estructura u obra, su carpeta de planos también va a la papelera de Drive
+// (si ninguna otra estructura u obra usa esa misma carpeta). Si falla, el borrado queda hecho igual.
+const tieneCarpeta = (tipo, o) => !!(o && COLUMNA_PLANOS[tipo] && S.api?.hayCarpetasDrive && esCarpetaDrive(o.planos));
+async function carpetaTrasBorrar(tipo, o) {
+  if (!tieneCarpeta(tipo, o)) return "";
+  const otros = ["estructura", "obra"].some((t) => (S.datos[t] || []).some((y) => y.planos === o.planos && !(t === tipo && y.id === o.id)));
+  if (otros) return "";
+  try {
+    const r = await S.api.carpetaAPapelera(o.planos);
+    return r.ok ? " y su carpeta a la papelera de Drive" : r.noEsta ? "" : `. La carpeta quedó en Drive: ${r.omitida}`;
+  } catch (e) { return `. La carpeta quedó en Drive: ${e.message}`; }
+}
 
 async function limpiarCarpetasViejas() {
   if (!S.perfil?.admin || !S.api?.hayCarpetasDrive || S.limpiandoCarpetas || S.carpetasRevisadas) return;
