@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-9";
+import { crearApi } from "./api.js?v=2026-11-23-10";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -809,7 +809,7 @@ function bloqueBorrar(tipo, o) {
     cuerpo = `<p class="nota" style="margin:0">Pediste que se borre. Queda así hasta que un administrador lo apruebe o lo rechace.</p>`;
   } else if (S.perfil?.admin) {
     cuerpo = `<button class="boton boton-peligro" type="button" id="borrar-elemento">Borrar ${nombre}</button>
-      <p class="nota" style="margin:8px 0 0">${conHitos(tipo) ? "Se borra también su historial de hitos y cuaderno. " : ""}Queda una copia de respaldo en la base.</p>`;
+      <p class="nota" style="margin:8px 0 0">${conHitos(tipo) ? "Se borra también su historial de hitos y cuaderno. " : ""}Queda una copia de respaldo en la base por 30 días.</p>`;
   } else {
     cuerpo = `<button class="boton boton-peligro" type="button" id="pedir-borrado">Pedir que se borre</button>
       <form class="form" id="form-borrado" hidden style="margin-top:10px">
@@ -830,7 +830,7 @@ function enlazarBorrar(ficha, tipo, o) {
   };
   const b = $("#borrar-elemento", ficha);
   if (b) b.onclick = async () => {
-    if (!confirm(`¿Borrar ${cod}? Se borra para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base.`)) return;
+    if (!confirm(`¿Borrar ${cod}? Se borra para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base por 30 días.`)) return;
     b.disabled = true;
     try { await S.api.pedirBorrado(tipo, o.id, null); await despues(`${cod} borrado`); }
     catch (e) { aviso(e.message, true); b.disabled = false; }
@@ -856,7 +856,7 @@ function enlazarBorrar(ficha, tipo, o) {
   });
 }
 async function resolverPedido(id, aprobar, cod, desdeFicha) {
-  if (aprobar && !confirm(`¿Aprobar y borrar ${cod}? Se borra para todos (web, QGIS y QField). Queda una copia de respaldo en la base.`)) return;
+  if (aprobar && !confirm(`¿Aprobar y borrar ${cod}? Se borra para todos (web, QGIS y QField). Queda una copia de respaldo en la base por 30 días.`)) return;
   try {
     await S.api.resolverBorrado(id, aprobar);
     aviso(aprobar ? `${cod} borrado` : "Pedido rechazado");
@@ -1327,7 +1327,7 @@ async function borrarElegidas(tipo, filas) {
   const nombres = filas.slice(0, 6).map((x) => nombreBorrar(tipo, x.o)).join(", ") + (n > 6 ? ` y ${n - 6} más` : "");
   let motivo = null;
   if (admin) {
-    if (!confirm(`¿Eliminar ${n === 1 ? "1 elemento" : `${n} elementos`} de ${CAPAS_LISTA.find((c) => c.id === T.capa).nombre}?\n${nombres}\n\nSe borran para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base.`)) return;
+    if (!confirm(`¿Eliminar ${n === 1 ? "1 elemento" : `${n} elementos`} de ${CAPAS_LISTA.find((c) => c.id === T.capa).nombre}?\n${nombres}\n\nSe borran para todos (web, QGIS y QField)${conHitos(tipo) ? ", con sus hitos y su cuaderno" : ""}. Queda una copia de respaldo en la base por 30 días.`)) return;
   } else {
     motivo = prompt(`Vas a pedir que se eliminen ${n === 1 ? "1 elemento" : `${n} elementos`}: ${nombres}.\n¿Por qué? (lo ve el administrador)`, "");
     if (motivo === null) return;
@@ -3641,7 +3641,7 @@ function enlazarForma(ficha, tipo, x, nombre) {
   ficha.querySelectorAll("[data-forma]").forEach((bt) => (bt.onclick = () => resolverCambioForma(Number(bt.dataset.forma), bt.dataset.aprobar === "1", nombre)));
 }
 async function resolverCambioForma(id, aprobar, nombre) {
-  if (aprobar && !confirm(`¿Aprobar el cambio de ${nombre}? Se cambia para todos (web, QGIS y QField); la forma anterior queda de respaldo.`)) return;
+  if (aprobar && !confirm(`¿Aprobar el cambio de ${nombre}? Se cambia para todos (web, QGIS y QField); la forma anterior queda de respaldo por 30 días.`)) return;
   try {
     await S.api.resolverForma(id, aprobar);
     aviso(aprobar ? `${nombre}: cambio aprobado` : "Cambio rechazado");
@@ -3957,7 +3957,7 @@ async function aceptarEdicion(datos, b, mal) {
   const ed = DIB.editar, destino = DIB.destino, admin = !!S.perfil?.admin;
   const md = medidasDe(DIB.v);
   if (!confirm(admin
-    ? `¿Aceptar los cambios de ${ed.nombre}? Queda con ${DIB.v.length} vértices y ${areaTxt(md.area)}. Se cambia para todos (web, QGIS y QField); la forma anterior queda guardada de respaldo.`
+    ? `¿Aceptar los cambios de ${ed.nombre}? Queda con ${DIB.v.length} vértices y ${areaTxt(md.area)}. Se cambia para todos (web, QGIS y QField); la forma anterior queda guardada de respaldo por 30 días.`
     : `¿Enviar el cambio de ${ed.nombre} para que lo apruebe un administrador?`)) return;
   const texto = b.textContent;
   b.disabled = true; b.textContent = "Guardando…";
