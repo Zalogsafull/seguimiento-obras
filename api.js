@@ -66,6 +66,19 @@ async function crearNeon() {
         : error.message);
       return data;
     },
+    // Historial de cambios hechos desde la web (sql/parte19_historial.sql)
+    async historial(dias = 30) {
+      const { data, error } = await neon.rpc("historial_cambios", { p_dias: dias });
+      if (error) throw new Error(/historial_cambios|schema cache|could not find/i.test(error.message)
+        ? "Falta preparar la base: corré sql/parte19_historial.sql en Neon y tocá Refresh schema cache."
+        : error.message);
+      return data || [];
+    },
+    async deshacerCambio(tx, forzar = false) {
+      const { data, error } = await neon.rpc("deshacer_cambio", { p_tx: tx, p_forzar: forzar });
+      if (error) throw new Error(error.message);
+      return data;
+    },
     async cambiosForma() {
       const { data, error } = await neon.rpc("cambios_forma_pendientes");
       return error ? [] : data || []; // sin la parte 17 todavía no hay cambios
@@ -199,6 +212,18 @@ function crearDemo() {
     padr: [{ id: 1, padron: "21278", area_m2: 45230, geojson: pol([[-34.7880, -55.8540], [-34.7880, -55.8470], [-34.7925, -55.8470], [-34.7925, -55.8540]]) }],
   };
   let cambioResuelto = false;
+  const hace = (min) => new Date(Date.now() - min * 60000).toISOString();
+  const historialDemo = [
+    { id: 9, tx: 104, cuando: hace(12), usuario: "Juan Pérez", usuario_id: "u-juan", tipo: "amojonamiento", objeto_id: 4, codigo: "CPD", op: "INSERT", antes: null, despues: { "CÓDIGO": "CPD", DESCRIPCION: "VERTICE TRIANGULO" }, deshecho: false },
+    { id: 8, tx: 103, cuando: hace(40), usuario: "Juan Pérez", usuario_id: "u-juan", tipo: "triangulo", objeto_id: 1, codigo: "DC", op: "UPDATE", antes: { "CÓDIGO": "DC" }, despues: { "CÓDIGO": "DC" }, geom_cambio: true, deshecho: false },
+    { id: 7, tx: 102, cuando: hace(95), usuario: "Ana", usuario_id: "u-ana", tipo: "estructura", objeto_id: 2, codigo: "LR2", op: "UPDATE",
+      antes: { "FECHA FIN": null, "OBSERVACIONES": null, "D.O.": "G.S." }, despues: { "FECHA FIN": "2026-11-20", "OBSERVACIONES": "Terminaron el cerco", "D.O.": "G.S./J.P." }, deshecho: false },
+    { id: 6, tx: 101, cuando: hace(180), usuario: "Juan Pérez", usuario_id: "u-juan", tipo: "estructura", objeto_id: 1, codigo: "CPD", op: "UPDATE", antes: { ETAPA: 2 }, despues: { ETAPA: 3 }, deshecho: false },
+    { id: 5, tx: 101, cuando: hace(180), usuario: "Juan Pérez", usuario_id: "u-juan", tipo: "hito", objeto_id: 3, codigo: "CPD", detalle: "Hormigonado", padre_tipo: "estructura", padre_id: 1, op: "UPDATE",
+      antes: { estado: "PENDIENTE", fecha_real: null }, despues: { estado: "HECHO", fecha_real: dia(0) }, deshecho: false },
+    { id: 4, tx: 100, cuando: hace(1500), usuario: "Ana", usuario_id: "u-ana", tipo: "cuaderno", objeto_id: 9, codigo: "GDA", detalle: "Visita: falta la puesta a tierra", padre_tipo: "estructura", padre_id: 3, op: "INSERT",
+      antes: null, despues: { tipo: "VISITA", texto: "Visita: falta la puesta a tierra" }, deshecho: true, deshecho_por: "Gonza", deshecho_cuando: hace(1400) },
+  ];
   let hid = 1, cid = 1;
   const hitos = [], cuaderno = [];
   for (const [tipo, lista] of [["estructura", est], ["obra", obr]]) {
@@ -328,6 +353,19 @@ function crearDemo() {
       return "APLICADO";
     },
     // ?demo=1&pendiente=1 muestra un cambio de forma pedido por otra persona
+    // historial de la demostración: algunos cambios de ejemplo
+    async historial() {
+      await espera();
+      return structuredClone(historialDemo);
+    },
+    async deshacerCambio(tx, forzar) {
+      await espera();
+      const filas = historialDemo.filter((h) => h.tx === tx && !h.deshecho);
+      if (!filas.length) return "NADA";
+      if (tx === 102 && !forzar) return "CAMBIADO_DESPUES";
+      for (const h of filas) Object.assign(h, { deshecho: true, deshecho_por: "Gonza", deshecho_cuando: new Date().toISOString() });
+      return "DESHECHO";
+    },
     async cambiosForma() {
       await espera();
       if (!new URLSearchParams(location.search).has("pendiente") || cambioResuelto) return [];

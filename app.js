@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-14";
+import { crearApi } from "./api.js?v=2026-11-23-15";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -436,6 +436,7 @@ async function entrarApp() {
 function ponerUsuario() {
   $("#nombre-usuario").textContent = S.perfil.nombre;
   $("#boton-usuarios").hidden = !S.perfil.admin;
+  $("#boton-historial").hidden = !S.perfil.admin;
   $("#boton-nuevo").hidden = !editor();
 }
 
@@ -459,6 +460,7 @@ function mostrarApp() {
     location.reload();
   };
   $("#boton-usuarios").onclick = abrirAdmin;
+  $("#boton-historial").onclick = () => abrirHistorial();
   $("#salir").onclick = salirCuenta;
   $("#estado-datos").onclick = () => { if (S.estadoRed === "sinred") actualizar(); };
   $("#actualizar-ahora").onclick = async () => { await actualizar(); pintarAjustes(); };
@@ -823,7 +825,9 @@ function bloqueBorrar(tipo, o) {
       </form>
       <p class="nota" style="margin:8px 0 0">Un administrador recibe el pedido y lo aprueba o lo rechaza.</p>`;
   }
-  return `<div class="ficha-bloque zona-borrar"><h2>Borrar</h2>${cuerpo}</div>`;
+  const hist = S.perfil?.admin ? `<div class="ficha-bloque"><h2>Historial</h2>
+      <button class="boton" type="button" data-historial="${tipo}:${o.id}">Ver los cambios hechos desde la web</button></div>` : "";
+  return `${hist}<div class="ficha-bloque zona-borrar"><h2>Borrar</h2>${cuerpo}</div>`;
 }
 function enlazarBorrar(ficha, tipo, o) {
   const cod = nombreBorrar(tipo, o);
@@ -855,6 +859,10 @@ function enlazarBorrar(ficha, tipo, o) {
       } catch (e) { aviso(e.message, true); enviar.disabled = false; }
     };
   }
+  ficha.querySelectorAll("[data-historial]").forEach((b) => (b.onclick = () => {
+    const [t, id] = b.dataset.historial.split(":");
+    abrirHistorial({ tipo: t, id: Number(id), nombre: cod });
+  }));
   ficha.querySelectorAll("[data-resolver]").forEach((x) => {
     x.onclick = () => resolverPedido(Number(x.dataset.resolver), x.dataset.aprobar === "1", cod, true);
   });
@@ -2508,6 +2516,150 @@ document.addEventListener("scroll", (ev) => { if (SG.caja && ev.target !== SG.ca
 window.visualViewport?.addEventListener("resize", ubicarSugerencias);
 window.addEventListener("resize", ubicarSugerencias);
 
+// ------------------------------------------------------------ historial de cambios (solo administradores)
+// Todo lo que se agrega, cambia o borra desde la web queda anotado 30 días; desde acá se puede deshacer.
+const H = { filas: [], usuario: "", tipo: "", texto: "", elemento: null };
+const NOMBRE_HIST = { estructura: "la estructura", obra: "la obra", relevamiento: "el punto de relevamiento", amojonamiento: "el mojón",
+  triangulo: "el triángulo", padron: "el padrón", hito: "el hito", cuaderno: "el cuaderno" };
+const CAPA_HIST = { estructura: "Estructuras", obra: "Obras", relevamiento: "Relevamiento", amojonamiento: "Amojonamiento",
+  triangulo: "Triángulos", padron: "Padrones" };
+// campos que calcula la base: no hace falta mostrarlos
+const HIST_SIN_MOSTRAR = new Set(["modificado", "creado", "LAT", "LONG", "Maps", "MAPS", "WAZE", "Waze", "X", "Y", "fid", "id", "estructura_id", "obra_id"]);
+const NOMBRE_CAMPO = { estado: "Estado", fecha_real: "Fecha", fecha_prevista: "Fecha prevista", recordatorio: "Recordatorio", notas: "Notas", texto: "Texto", tipo: "Tipo" };
+// el nombre de la columna como se ve en la web (Fin, Director de obra…)
+function nombreCampo(c) {
+  if (NOMBRE_CAMPO[c]) return NOMBRE_CAMPO[c];
+  for (const lista of Object.values(CAMPOS_EDITABLES)) { const x = lista.find((y) => y[0] === c); if (x) return TITULO_CORTO[x[2]] || x[2]; }
+  return { ESTADO: "Situación", Estado: "Situación", ETAPA: "Etapa", "CÓDIGO": "Código", DESCRIPCION: "Descripción", "DESCRIPCIÓN": "Descripción", PADRON: "Padrón" }[c] || c;
+}
+function valorHist(v) {
+  if (v == null || v === "") return "vacío";
+  const t = String(v);
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return fecha(t.slice(0, 10));
+  return t.length > 60 ? t.slice(0, 57) + "…" : t;
+}
+function cambiosDe(h) {
+  if (h.op !== "UPDATE") return [];
+  const k = [...new Set([...Object.keys(h.antes || {}), ...Object.keys(h.despues || {})])]
+    .filter((c) => !HIST_SIN_MOSTRAR.has(c) && JSON.stringify(h.antes?.[c] ?? null) !== JSON.stringify(h.despues?.[c] ?? null));
+  const l = k.map((c) => `${nombreCampo(c)}: ${valorHist(h.antes?.[c])} → ${valorHist(h.despues?.[c])}`);
+  if (h.geom_cambio) l.push(h.tipo === "triangulo" || h.tipo === "padron" ? "Cambió la forma" : "Cambió la ubicación");
+  return l;
+}
+// Una «acción» = todo lo que se guardó junto (por ejemplo, marcar un hito cambia también la etapa)
+function agruparHistorial(filas) {
+  const g = new Map();
+  for (const h of filas) { if (!g.has(h.tx)) g.set(h.tx, []); g.get(h.tx).push(h); }
+  return [...g.values()].map((hs) => {
+    hs.sort((a, b) => a.id - b.id);
+    const principal = hs.find((h) => h.tipo === "hito" && h.op === "UPDATE") || hs.find((h) => h.tipo !== "hito" && h.tipo !== "cuaderno") || hs[0];
+    return { tx: principal.tx, hs, principal, cuando: principal.cuando, usuario: principal.usuario || "Alguien",
+      usuario_id: principal.usuario_id, deshecho: hs.every((h) => h.deshecho), deshace: hs.some((h) => h.deshace_tx), h: principal };
+  });
+}
+function tituloAccion(a) {
+  const h = a.h, cod = h.codigo ? ` ${h.codigo}` : "";
+  if (a.deshace) return `Deshizo un cambio en ${NOMBRE_HIST[h.tipo] || h.tipo}${cod}`;
+  if (h.tipo === "hito") return h.op === "UPDATE" ? `Marcó el hito «${h.detalle}» de${cod}` : `${h.op === "INSERT" ? "Agregó" : "Sacó"} el hito «${h.detalle}» de${cod}`;
+  if (h.tipo === "cuaderno") return h.op === "INSERT" ? `Escribió en el cuaderno de${cod}` : h.op === "DELETE" ? `Borró una nota del cuaderno de${cod}` : `Cambió una nota del cuaderno de${cod}`;
+  const verbo = { INSERT: "Agregó", UPDATE: "Cambió", DELETE: "Borró" }[h.op];
+  return `${verbo} ${NOMBRE_HIST[h.tipo] || h.tipo}${cod}`;
+}
+function lineasAccion(a) {
+  const l = [];
+  for (const h of a.hs) {
+    if (h.tipo === "cuaderno" && h.op === "INSERT") l.push(`«${valorHist(h.despues?.texto || h.detalle)}»`);
+    else if (h === a.h || (h.tipo !== "hito" || h.op === "UPDATE")) l.push(...cambiosDe(h).map((c) => (h !== a.h && h.tipo !== a.h.tipo ? `${CAPA_HIST[h.tipo] ? "" : (NOMBRE_HIST[h.tipo] || "") + " · "}${c}` : c)));
+  }
+  const hitos = a.hs.filter((h) => h.tipo === "hito" && h.op !== "UPDATE").length;
+  if (hitos && a.h.tipo !== "hito") l.push(`(con sus ${hitos} hitos)`);
+  return [...new Set(l)];
+}
+
+async function abrirHistorial(elemento = null) {
+  if (!S.perfil?.admin) return;
+  H.elemento = elemento;
+  const caja = $("#admin");
+  $("#ficha").hidden = true;
+  caja.hidden = false;
+  caja.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Historial de cambios</h2></div><p class="nota" style="padding:0 16px">Cargando…</p>`;
+  enlazarCerrar(caja, () => { caja.hidden = true; });
+  try { H.filas = await S.api.historial(30); }
+  catch (e) { caja.querySelector(".nota").textContent = e.message; return; }
+  pintarHistorial();
+}
+
+function pintarHistorial() {
+  const caja = $("#admin");
+  const acciones = agruparHistorial(H.filas);
+  const usuarios = [...new Map(acciones.map((a) => [a.usuario_id, a.usuario])).entries()].filter(([id]) => id);
+  const t = normal(H.texto), el = H.elemento;
+  const vale = (a) => (!H.usuario || a.usuario_id === H.usuario)
+    && (!H.tipo || a.hs.some((h) => h.tipo === H.tipo || h.padre_tipo === H.tipo))
+    && (!t || a.hs.some((h) => normal(h.codigo).includes(t) || normal(h.detalle).includes(t)))
+    && (!el || a.hs.some((h) => (h.tipo === el.tipo && h.objeto_id === el.id) || (h.padre_tipo === el.tipo && h.padre_id === el.id)));
+  const lista = acciones.filter(vale);
+  const cuando = (iso) => { const d = new Date(iso); return `${fecha(iso.slice(0, 10))} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  caja.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Historial de cambios</h2>
+      <p class="nota" style="margin:0">Lo que se agregó, cambió o borró desde la web en los últimos 30 días, de quién y cuándo. Lo hecho desde QGIS o QField no aparece.</p></div>
+    <form class="form hist-filtros" id="hist-filtros">
+      ${el ? `<p class="hist-elemento">Solo <b>${esc(el.nombre)}</b> <button type="button" class="enlace" id="hist-todos">Ver todo</button></p>` : ""}
+      <div class="dos">
+        <label>Usuario<select name="usuario"><option value="">Todos</option>${usuarios.map(([id, n]) => `<option value="${esc(id)}" ${H.usuario === id ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
+        <label>Capa<select name="tipo"><option value="">Todas</option>${Object.entries(CAPA_HIST).map(([k, n]) => `<option value="${k}" ${H.tipo === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      </div>
+      <label>Buscar<input type="search" name="texto" value="${esc(H.texto)}" placeholder="Código, padrón o hito"></label>
+    </form>
+    <div class="ficha-bloque hist-lista">
+      ${lista.length ? lista.map((a) => {
+        const ls = lineasAccion(a);
+        return `<div class="hist-accion${a.deshecho ? " deshecha" : ""}">
+          <p class="hist-quien"><b>${esc(a.usuario)}</b> <small>${cuando(a.cuando)}</small></p>
+          <p class="hist-que">${esc(tituloAccion(a))}</p>
+          ${ls.length ? `<ul>${ls.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+          ${a.deshecho ? `<p class="nota hist-deshecho">Deshecho${a.hs[0].deshecho_por ? ` por ${esc(a.hs[0].deshecho_por)}` : ""}${a.hs[0].deshecho_cuando ? ` el ${cuando(a.hs[0].deshecho_cuando)}` : ""}.</p>` : ""}
+          <div class="acciones">
+            <button class="boton boton-chico" type="button" data-hver="${a.tx}">Ver</button>
+            ${a.deshecho || a.deshace ? "" : `<button class="boton boton-chico" type="button" data-hdeshacer="${a.tx}">Deshacer</button>`}
+          </div></div>`;
+      }).join("") : `<p class="nota">No hay cambios${H.usuario || H.tipo || H.texto || el ? " con esos filtros" : " en los últimos 30 días"}.</p>`}
+    </div>`;
+  enlazarCerrar(caja, () => { caja.hidden = true; });
+  const f = $("#hist-filtros");
+  f.usuario.onchange = () => { H.usuario = f.usuario.value; pintarHistorial(); };
+  f.tipo.onchange = () => { H.tipo = f.tipo.value; pintarHistorial(); };
+  f.texto.oninput = () => { H.texto = f.texto.value; clearTimeout(H.timer); H.timer = setTimeout(() => { pintarHistorial(); const n = $("#hist-filtros").texto; n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
+  f.onsubmit = (e) => e.preventDefault();
+  const todos = $("#hist-todos");
+  if (todos) todos.onclick = () => { H.elemento = null; pintarHistorial(); };
+  const de = (tx) => acciones.find((a) => a.tx === Number(tx));
+  caja.querySelectorAll("[data-hver]").forEach((b) => (b.onclick = () => {
+    const h = de(b.dataset.hver).h;
+    const tipo = h.padre_tipo || h.tipo, id = h.padre_id || h.objeto_id;
+    const lista = S.datos[DATOS_DE_TIPO[tipo] || tipo] || [];
+    if (!lista.some((o) => o.id === id)) return aviso("Ese elemento ya no está en el mapa (puede que esté borrado).", true);
+    caja.hidden = true;
+    abrirElemento(tipo, id);
+  }));
+  caja.querySelectorAll("[data-hdeshacer]").forEach((b) => (b.onclick = () => deshacerAccion(de(b.dataset.hdeshacer), b)));
+}
+
+async function deshacerAccion(a, b) {
+  if (!confirm(`¿Deshacer este cambio de ${a.usuario}?\n${tituloAccion(a)}\n\nVuelve a quedar como estaba antes, para todos (web, QGIS y QField).`)) return;
+  b.disabled = true;
+  try {
+    let r = await S.api.deshacerCambio(a.tx, false);
+    if (r === "CAMBIADO_DESPUES") {
+      if (!confirm("Después de este cambio, alguien volvió a cambiar lo mismo. Si lo deshacés, esos cambios posteriores también se pierden (quedan anotados en el historial). ¿Deshacer igual?")) { b.disabled = false; return; }
+      r = await S.api.deshacerCambio(a.tx, true);
+    }
+    aviso(r === "NADA" ? "Ese cambio ya estaba deshecho." : "Cambio deshecho");
+    await cargar();
+    H.filas = await S.api.historial(30);
+    pintarHistorial();
+  } catch (e) { aviso(e.message, true); b.disabled = false; }
+}
+
 // ------------------------------------------------------------ instalar como app
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 let pedidoInstalar = null;
@@ -3733,7 +3885,7 @@ function bloqueForma(tipo, x, nombre) {
       <button class="boton" type="button" id="editar-forma">Corregir mi pedido</button>`;
   } else {
     cuerpo = `<button class="boton" type="button" id="editar-forma">Editar forma y datos</button>
-      <p class="nota" style="margin:8px 0 0">Mover, agregar o sacar vértices y cambiar el ${tipo === "padron" ? "número de padrón" : "código"}.${S.perfil?.admin ? "" : " Lo aprueba un administrador."}</p>`;
+      <p class="nota" style="margin:8px 0 0">Mover, agregar o sacar vértices y cambiar el ${tipo === "padron" ? "número de padrón" : "código"}.</p>`;
   }
   return `<div class="ficha-bloque"><h2>Forma</h2>${cuerpo}</div>`;
 }
@@ -3985,8 +4137,7 @@ function pintarDibujo() {
       </div>
       <div class="ficha-bloque acciones-nuevo">
         <p class="error" id="dib-error" hidden></p>
-        <button class="boton boton-primario" type="submit" id="dib-guardar">${ed ? (admin ? "Aceptar cambios" : "Enviar cambio para aprobar") : `Guardar ${tri ? "triángulo" : "padrón"}`}</button>
-        ${ed && !admin ? `<p class="nota" style="margin:0">El cambio queda pendiente hasta que un administrador lo apruebe.</p>` : ""}
+        <button class="boton boton-primario" type="submit" id="dib-guardar">${ed ? "Aceptar cambios" : `Guardar ${tri ? "triángulo" : "padrón"}`}</button>
         <button class="boton" type="button" id="dib-cancelar">Cancelar</button>
       </div>
     </form>`;
@@ -4066,9 +4217,7 @@ async function guardarDibujo(ev) {
 async function aceptarEdicion(datos, b, mal) {
   const ed = DIB.editar, destino = DIB.destino, admin = !!S.perfil?.admin;
   const md = medidasDe(DIB.v);
-  if (!confirm(admin
-    ? `¿Aceptar los cambios de ${ed.nombre}? Queda con ${DIB.v.length} vértices y ${areaTxt(md.area)}. Se cambia para todos (web, QGIS y QField); la forma anterior queda guardada de respaldo por 30 días.`
-    : `¿Enviar el cambio de ${ed.nombre} para que lo apruebe un administrador?`)) return;
+  if (!confirm(`¿Aceptar los cambios de ${ed.nombre}? Queda con ${DIB.v.length} vértices y ${areaTxt(md.area)}. Se cambia para todos (web, QGIS y QField)${admin ? "" : "; queda anotado en el historial"}.`)) return;
   const texto = b.textContent;
   b.disabled = true; b.textContent = "Guardando…";
   try {

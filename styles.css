@@ -524,3 +524,16 @@ body.con-tabla .mapa-zona { display: none; }
   .tabla-barra { padding-right: 170px; }
   .tabla-barra .t-modo { position: absolute; top: 10px; right: 56px; height: 32px; }
 }
+
+/* historial de cambios */
+.hist-filtros { padding: 0 16px 12px; border-bottom: 1px solid var(--linea); display: grid; gap: 8px; }
+.hist-elemento { margin: 0; font-size: 13.5px; color: var(--tinta-suave); }
+.hist-accion { padding: 10px 0; border-bottom: 1px solid var(--linea-suave); }
+.hist-accion:last-child { border-bottom: 0; }
+.hist-quien { margin: 0; font-size: 13px; }
+.hist-quien small { color: var(--tinta-suave); margin-left: 4px; }
+.hist-que { margin: 3px 0 4px; font-size: 14.5px; color: var(--tinta); }
+.hist-accion ul { margin: 0 0 6px; padding-left: 18px; font-size: 13px; color: var(--tinta-suave); }
+.hist-accion .acciones { display: flex; gap: 6px; }
+.hist-accion.deshecha .hist-que, .hist-accion.deshecha ul { text-decoration: line-through; opacity: .6; }
+.hist-deshecho { margin: 0 0 6px; }
