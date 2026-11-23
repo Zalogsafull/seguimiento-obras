@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-20";
+import { crearApi } from "./api.js?v=2026-11-23-21";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
