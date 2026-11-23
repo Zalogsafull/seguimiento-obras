@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-17";
+import { crearApi } from "./api.js?v=2026-11-23-18";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1310,7 +1310,7 @@ function pintarTabla() {
       <button class="boton boton-chico" type="button" id="t-ver">Ver en el mapa</button>
       <button class="boton boton-chico" type="button" id="t-limpiar">Limpiar selección</button>
       <span class="t-progreso" id="t-progreso"></span>
-      ${editor() ? `<button class="boton boton-peligro boton-chico" type="button" id="t-borrar">${admin ? "Eliminar selección" : "Pedir eliminar selección"}</button>` : ""}
+      ${editor() ? `<button class="boton boton-peligro boton-chico" type="button" id="t-borrar">${admin ? "Eliminar" : "Pedir eliminar"} ${nSel === 1 ? "fila" : "filas"}</button>` : ""}
     </form>` : ""}
     <div class="tabla-scroll">
       <table class="tabla-datos">
