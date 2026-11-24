@@ -3,7 +3,7 @@
 Web para ver y seguir las estructuras y obras de la base de Neon que también usan QGIS y QField:
 mapa por etapa, hitos para tildar, cuaderno de obra, vencimientos de recepción y filtro "Mis obras".
 
-- Publicada con GitHub Pages: `https://zalogsafull.github.io/seguimiento-obras/`
+- Publicada con GitHub Pages: `https://oicirepo.github.io/Seguimiento/`
 - Modo demostración, con datos de ejemplo y sin tocar la base: agregá `?demo=1` a la dirección.
 
 ## Cómo funciona
