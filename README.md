@@ -2,4 +2,4 @@
 
 Se mudó a https://github.com/oicirepo/Seguimiento
 
-Web: 
+Web: https://oicirepo.github.io/Seguimiento/
